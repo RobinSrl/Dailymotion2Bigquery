@@ -214,5 +214,3 @@ if __name__ == "__main__":
     data_handler.init(query, variables)
 
     logging.info("Executed in %d seconds" % (time.time() - start_time) )
-
-    data_handler.data.to_csv('data_handler.csv')

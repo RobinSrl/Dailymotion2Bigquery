@@ -251,7 +251,14 @@ data_handler = DailyMotionDataHandle(
     )
 )
 data_handler.init(query, variables)
+
 print(data_handler.data.tail())
+
+```
+il `data_handler.data` è un DataFrame, e si può convertire in json
+```python
+data_handler.data.to_json(orient='records', lines=True) # -> list[dict[str,Any]
+# convert dataframe into list of dict [{'key': value, ...}, ...]
 ```
 
 > [!CAUTION]
