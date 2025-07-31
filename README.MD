@@ -109,7 +109,6 @@ Metodi principali:
 - `graph_ql()`: Esecuzione query GraphQL
 - `rest()`: Chiamate REST API
 - `get_report_file()`: Generazione completa report con polling
-- `get_video_info()`: Informazioni specifiche video
 
 ### Gestione Asincrona Report
 
@@ -129,51 +128,88 @@ report_links = client.get_report_file(
     delay=60           # Delay iniziale 60 secondi
 )
 ```
+### Classe di gestione dei dati  `DailyMotionDataHandle()`
+Classe finale per la gestione dei dati tramite client API DailyMotion:
+- **GraphQL**: Esecuzione query GraphQL con gestione errori
+- **REST API**: Supporto per endpoint REST
+- **Report Generation**: Generazione asincrona report con polling automatico
+- **Token Refresh**: Gestione automatica refresh token prima delle richieste
+- 
+Attributi Pricipali
+- `data`: L'attributo data espone esternamente una copia dei dati analizzati
+
+Metodi principali:
+- `init()`: Esecutore principale
+  - Esegue le chiamate API per la ricezione dei dati
+  - Imposta un Database con i dati ricevuti
+  - Esegue il refinig dei dati
+  - 
+> [!IMPORTANT]
+> **Il refining non gestisce l'eliminazione dei duplicati**
 
 ## Limitazioni e Considerazioni
 
 > [!WARNING]
 > **Limitazioni API DailyMotion:**
-
-### Limitazioni Report
-- **Generazione Asincrona**: I report vengono generati in modo asincrono
-- **Formato**: I dati vengono estratti esclusivamente in formato CSV
-- **Fuso Orario**: Tutti i report sono generati nel fuso orario UTC
-- **Concorrenza**: Massimo **2 report** possono essere generati contemporaneamente
-- **Tempo Generazione**: Un report può richiedere fino a **2 ore** per essere completato
-- **Retention**: I report vengono automaticamente eliminati dopo **48 ore**
+> - **Generazione Asincrona**: I report vengono generati in modo asincrono
+> - **Formato**: I dati vengono estratti esclusivamente in formato CSV
+> - **Fuso Orario**: Tutti i report sono generati nel fuso orario UTC
+> - **Concorrenza**: Massimo **2 report** possono essere generati contemporaneamente
+> - **Tempo Generazione**: Un report può richiedere fino a **2 ore** per essere completato
+> - **Retention**: I report vengono automaticamente eliminati dopo **48 ore**
 
 ### Limitazioni Query
-- **Intervallo Date**: Minimo 1 giorno, massimo **180 giorni** per richiesta
+- **Intervallo Date**: Minimo 1 giorno, massimo **30 giorni** per richiesta
 - **Dimensioni**: Massimo **8 dimensioni** per singolo report
-- **Rate Limiting**: Rispettare i limiti di frequenza delle chiamate API
 
-### Best Practices
-- Implementare retry logic con exponential backoff
-- Monitorare lo stato dei report durante la generazione
-- Scaricare i report entro 48 ore dalla generazione
-- Gestire gracefully i timeout e gli errori di rete
-- Utilizzare logging appropriato per debugging
+## Implementazioni future
+- **Richieste Asincrone** Implementare una logica di richieste asincorne per il download dei file.csv e delle REST <br> 
+```python
+import aiohttp
+import asyncio
+
+async def fetch_all(urls: list[str]) -> list[str]:
+    async with aiohttp.ClientSession() as session:
+        # prepare url task
+        tasks = [session.get(url) for url in urls]
+        # execute all request
+        responses = await asyncio.gather(*tasks)
+        # extract and return response
+        return [await {resp.json()} for resp in responses]
+
+urls = [...#list of urls]
+asyncio.run(fetch_all(urls))
+```
+- **Caching** sulle richieste già effettuate.
+
+```python
+import functools
+
+@functools.cache
+@functools.lru_cache
+...
+
+```
 
 ## Variabili d'Ambiente Richieste
 
-```bash
+```dotenv
 # Credenziali DailyMotion
 DM_CLIENT_API=your_client_id
 DM_CLIENT_SECRET=your_client_secret
 
 # Endpoint API
-DM_AUTH_URL=https://partner.api.dailymotion.com/oauth/token
-DM_GRAPH_URL=https://partner.api.dailymotion.com/graphql
-DM_REST_URL=https://api.dailymotion.com
+DM_BASE_URL=https://partner.api.dailymotion.com
+DM_AUTH_URL=${DM_BASE_URL}/oauth/v1/token
+DM_GRAPH_URL=${DM_BASE_URL}/graphql
+DM_REST_URL=${DM_BASE_URL}/rest
 ```
 
 ## Esempio Completo
 
 ```python
 import os
-import pandas as pd
-from dailymotion_client import Authentication, DailyMotion
+from DailyMotion import Authentication, DailyMotion
 
 # Configurazione autenticazione
 auth = Authentication.from_credential(
@@ -186,46 +222,37 @@ auth = Authentication.from_credential(
 dm_client = DailyMotion(authentication=auth)
 
 # Query per report analytics
-analytics_query = '''
-mutation ($input: AskPartnerReportFileInput!) {
-  askPartnerReportFile(input: $input) {
-    reportFile {
-      reportToken
-    }
+query = '''mutation Report($video: AskPartnerReportFileInput!) {
+  report1: askPartnerReportFile(input: $video) {
+    reportFile { reportToken }
   }
-}
-'''
-
-# Parametri report
-report_params = {
-    "input": {
-        "metrics": ["VIEWS", "TIME_WATCHED_SECONDS", "UNIQUE_VIEWERS"],
-        "dimensions": ["DATE", "VIDEO_ID", "COUNTRY"],
-        "startDate": "2025-07-01",
-        "endDate": "2025-07-31",
-        "product": "CONTENT"
+ }'''
+variables ={
+    "video": {
+      "metrics": [
+        ...
+      ],
+      "dimensions": [
+        ...
+      ],
+      "startDate": "2025-07-30",
+      "endDate": "2025-07-30",
+      "product": "CONTENT"
     }
 }
 
-try:
-    # Generazione report con polling automatico
-    report_urls = dm_client.get_report_file(
-        query=analytics_query,
-        variable=report_params,
-        max_retry=20,
-        delay=120
+data_handler = DailyMotionDataHandle(
+    DailyMotion(
+        Authentication.from_credential(
+            os.environ.get("DM_CLIENT_API"),
+            os.environ.get("DM_CLIENT_SECRET"),
+            scope=['create_reports', 'delete_reports', 'manage_reports']
+        )
     )
-    
-    # Elaborazione dati
-    all_data = []
-    for url in report_urls:
-        df = pd.read_csv(url, parse_dates=['date'])
-        all_data.append(df)
-    
-    # Dataset finale
-    final_dataset = pd.concat(all_data, ignore_index=True)
-    print(f"Dataset generato: {len(final_dataset)} righe")
-    
-except Exception as e:
-    print(f"Errore durante l'elaborazione: {e}")
+)
+data_handler.init(query, variables)
+print(data_handler.data.tail())
 ```
+
+> [!CAUTION]
+> **L'esecuzione in media dura dai 10 ai 15 minuti per un giorno**

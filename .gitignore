@@ -3,6 +3,7 @@ venv/
 .env.local
 *.json
 *.csv
-
+*.bkt*
+.idea
 # Python
 __pycache__/
