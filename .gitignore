@@ -1,0 +1,8 @@
+# Virtual Environment
+venv/
+.env.local
+*.json
+*.csv
+
+# Python
+__pycache__/
