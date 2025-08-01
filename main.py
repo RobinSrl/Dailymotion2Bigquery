@@ -1,3 +1,4 @@
+import datetime
 import logging, os, dotenv, time
 from typing import Any
 import pandas as pd
@@ -174,6 +175,8 @@ class DailyMotionDataHandle(object):
 
 start_time = time.time()
 if __name__ == "__main__":
+    yesterday_date = datetime.date.today() - datetime.timedelta(days=1)
+
     query = '''mutation MultiReport($video: AskPartnerReportFileInput!) {
       report1: askPartnerReportFile(input: $video) {
         reportFile { reportToken }
@@ -189,7 +192,7 @@ if __name__ == "__main__":
             "VIEW_THROUGH_RATE"
           ],
               "dimensions": [
-                "HOUR",
+                "DAY",
                 "VIDEO_ID",
                 "MEDIA_TYPE",
                 "VISITOR_PAGE_URL", #estrarre subdomain in viste
@@ -197,8 +200,8 @@ if __name__ == "__main__":
                 "PLAYER_ID",
                 "PLAYLIST_ID"
               ],
-              "startDate": "2025-07-30", # datetime.date.today() - datetime.timedelta(days = 1)
-              "endDate": "2025-07-30", # datetime.date.today() - datetime.timedelta(days = 1)
+              "startDate": yesterday_date.strftime('%Y-%m-%d'),
+              "endDate": yesterday_date.strftime('%Y-%m-%d'),
               "product": "CONTENT"
         }
     }
