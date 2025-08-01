@@ -1,0 +1,41 @@
+# k8s-cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dailymotion-dp-stream-cronjob
+  namespace: frontend
+spec:
+  schedule: "30 00 * * *"
+  concurrencyPolicy: Allow
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: dailymotion-dp-stream-always-on
+              image: europe-west8-docker.pkg.dev/monrif-sites-dev/monrif-frontend-dev/dailymotion-dp-stream:0.0.2
+              env:
+                - name: DM_BASE_URL
+                  value: "https://partner.api.dailymotion.com"
+                - name: DM_BASE_URL
+                  value: "https://partner.api.dailymotion.com/oauth/v1/token"
+                - name: DM_BASE_URL
+                  value: "https://partner.api.dailymotion.com/graphql"
+                - name: DM_BASE_URL
+                  value: "https://partner.api.dailymotion.com/rest"
+                - name: DM_CLIENT_API
+                  valueFrom:
+                    secretKeyRef:
+                      name: dailymotion-dp-stream-secrets
+                      key: client_api
+                - name: DM_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: dailymotion-dp-stream-secrets
+                      key: client_secret
+              args:
+                - python
+                - main.py
+          restartPolicy: OnFailure

@@ -3,6 +3,10 @@ import logging, os, dotenv, time
 from typing import Any
 import pandas as pd
 from DailyMotion import Authentication, DailyMotion
+from bigquery_transfer import transfer
+
+logging.basicConfig(level=logging.INFO)
+
 
 # Check for environment files and load credentials
 # Priority: 1. .env.local, 2. .env
@@ -12,6 +16,7 @@ elif os.path.exists('.env'):
     dotenv.load_dotenv('.env')
 else:
     logging.error("Environment file not found, create a .env or .env.local file with your credentials.")
+
 
 class DailyMotionDataHandle(object):
     """A comprehensive data handler for DailyMotion analytics and content information.
@@ -110,6 +115,7 @@ class DailyMotionDataHandle(object):
 
         # Execute the GraphQL report mutation and get the list of CSV report download links
         report_links = self.__client.get_report_file(query=query, variable=variables)
+        logging.info(f"report links: {report_links}")
 
         # If multiple tokens are returned, each link corresponds to a token.
         # You may enhance logic here to handle tokens + variable mapping if needed
@@ -121,8 +127,11 @@ class DailyMotionDataHandle(object):
         """
         # Download and read each CSV file into a separate DataFrame
         for link in report_links:
-            self.__logger.debug(f"Reading CSV from {link}")
+            self.__logger.info(f"Reading CSV from {link}")
             dataframes.append(pd.read_csv(link, dtype={6: str}))
+
+        if not dataframes:
+            raise ValueError(f"No dataframes created")
 
         self.__data = pd.concat(dataframes, ignore_index=True)
 
@@ -215,5 +224,6 @@ if __name__ == "__main__":
 
     data_handler = DailyMotionDataHandle(DailyMotion(auth))
     data_handler.init(query, variables)
-
+    rows = data_handler.data.reset_index(drop=True).to_dict(orient="records")
+    transfer(rows)
     logging.info("Executed in %d seconds" % (time.time() - start_time) )
