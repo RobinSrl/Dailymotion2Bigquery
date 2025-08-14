@@ -13,17 +13,18 @@ spec:
     spec:
       template:
         spec:
+          serviceAccountName: bigquery-dp-dev
           containers:
             - name: dailymotion-dp-stream-always-on
-              image: europe-west8-docker.pkg.dev/monrif-sites-dev/monrif-frontend-dev/dailymotion-dp-stream:0.0.2
+              image: europe-west8-docker.pkg.dev/monrif-sites-dev/monrif-frontend-dev/dailymotion-dp-stream:0.2.0
               env:
                 - name: DM_BASE_URL
                   value: "https://partner.api.dailymotion.com"
-                - name: DM_BASE_URL
+                - name: DM_AUTH_URL
                   value: "https://partner.api.dailymotion.com/oauth/v1/token"
-                - name: DM_BASE_URL
+                - name: DM_GRAPH_URL
                   value: "https://partner.api.dailymotion.com/graphql"
-                - name: DM_BASE_URL
+                - name: DM_REST_URL
                   value: "https://partner.api.dailymotion.com/rest"
                 - name: DM_CLIENT_API
                   valueFrom:

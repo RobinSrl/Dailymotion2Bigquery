@@ -81,7 +81,7 @@ class DailyMotionDataHandle(object):
             'playlist': self.__fetch_details_from_rest('playlist', self.data['playlist_id'].dropna().unique(), ['id', 'name']),
             'player': self.__fetch_details_from_rest('player', self.data['player_id'].dropna().unique(), ['id', 'label'])
         }
-        print(self.__data.columns.tolist())
+        logging.info(self.__data.columns.tolist())
         # Iterate over each unique, non-null playlist ID
         # LEFT JOIN (sql) to merge the dataframe
         merged_df = self.data
@@ -224,6 +224,9 @@ if __name__ == "__main__":
 
     data_handler = DailyMotionDataHandle(DailyMotion(auth))
     data_handler.init(query, variables)
-    rows = data_handler.data.reset_index(drop=True).to_dict(orient="records")
+    df = data_handler.data.reset_index(drop=True)
+    df["video_created_time"] = df["video_created_time"].dt.strftime("%Y-%m-%dT%H:%M:%S")
+    df = df.where(pd.notnull(df), None)
+    rows = df.to_dict(orient="records")
     transfer(rows)
     logging.info("Executed in %d seconds" % (time.time() - start_time) )

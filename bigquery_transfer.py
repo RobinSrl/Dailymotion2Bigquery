@@ -1,3 +1,4 @@
+import logging
 from enum import EnumMeta, Enum
 
 from google.cloud import bigquery
@@ -28,7 +29,7 @@ data_sample = [
 """
 
 
-DEFAULT_FIELD = "DEFAULT"
+DEFAULT_FIELD = "NULLABLE"
 REQUIRED_FIELD = "REQUIRED"
 REPEATED_FIELD = "REPEATED"
 
@@ -63,28 +64,29 @@ class FieldTypeEnum(Enum):
 fields = [
     ("day", FieldTypeEnum.DATE, True),
     ("video_id", FieldTypeEnum.STRING, True),
-    ("media_type", FieldTypeEnum.STRING, True),
-    ("visitor_page_url", FieldTypeEnum.STRING, True),
-    ("visitor_device_type", FieldTypeEnum.STRING, True),
-    ("player_id", FieldTypeEnum.STRING, True),
+    ("media_type", FieldTypeEnum.STRING, False),
+    ("visitor_page_url", FieldTypeEnum.STRING, False),
+    ("visitor_device_type", FieldTypeEnum.STRING, False),
+    ("player_id", FieldTypeEnum.STRING, False),
     ("playlist_id", FieldTypeEnum.STRING, False),
-    ("views", FieldTypeEnum.INTEGER, True),
-    ("time_watched_seconds", FieldTypeEnum.INTEGER, True),
-    ("view_through_rate", FieldTypeEnum.FLOAT, True),
-    ("video_title", FieldTypeEnum.STRING, True),
+    ("views", FieldTypeEnum.INTEGER, False),
+    ("time_watched_seconds", FieldTypeEnum.INTEGER, False),
+    ("view_through_rate", FieldTypeEnum.FLOAT, False),
+    ("video_title", FieldTypeEnum.STRING, False),
     ("video_description", FieldTypeEnum.STRING, False),
-    ("video_duration", FieldTypeEnum.INTEGER, True),
-    ("video_created_time", FieldTypeEnum.TIMESTAMP, True),
+    ("video_duration", FieldTypeEnum.INTEGER, False),
+    ("video_created_time", FieldTypeEnum.TIMESTAMP, False),
     ("video_tags", FieldTypeEnum.STRING, list),
-    ("video_url", FieldTypeEnum.STRING, True),
+    ("video_url", FieldTypeEnum.STRING, False),
     ("player_label", FieldTypeEnum.STRING, False),
     ("estimated_earings_eur", FieldTypeEnum.NUMERIC, False)
 ]
 
 
 WRITE_DISPOSITION="WRITE_TRUNCATE"
-TABLE_ID_RAW = "robin_custom.dailymotion_raw_data"
-TABLE_ID_DEF = "robin_custom.dailymotion_default_data"
+PROJECT_NAME = "smart-data-platform-dev-401609"
+TABLE_ID_RAW = f"{PROJECT_NAME}.robin_custom.dailymotion_raw_data"
+TABLE_ID_DEF = f"{PROJECT_NAME}.robin_custom.dailymotion_default_data"
 TABLE_SCHEMA = [
     bigquery.schema.SchemaField(name, field.value, mode=get_mode(mode)) for name, field, mode in fields
 ]
@@ -96,27 +98,37 @@ FROM `{TABLE_ID_RAW}`
 
 
 def get_or_create_table(client):
+    def_id = TABLE_ID_DEF
+    raw_id = TABLE_ID_RAW
     try:
-        return client.get_table(TABLE_ID_DEF), client.get_table(TABLE_ID_RAW)
+        return client.get_table(def_id), client.get_table(raw_id)
     except NotFound:
-        table_raw = bigquery.Table(TABLE_ID_RAW, schema=TABLE_SCHEMA)
-        table_def = bigquery.Table(TABLE_ID_DEF, schema=TABLE_SCHEMA)
+        table_raw = bigquery.Table(raw_id, schema=TABLE_SCHEMA)
+        table_def = bigquery.Table(def_id, schema=TABLE_SCHEMA)
         return client.create_table(table_def), client.create_table(table_raw)
 
 
 def transfer(rows):
-    client = bigquery.Client(project="smart-data-platform-dev-401609")
+    logging.info(f"Data type: {type(rows)}")
+    logging.info(f"First row: {rows[:10]}")
+    client = bigquery.Client(project=PROJECT_NAME)
     table_def, table_raw = get_or_create_table(client)
     job_config = bigquery.LoadJobConfig(
         write_disposition=WRITE_DISPOSITION,
         schema=TABLE_SCHEMA,
         source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON
     )
-    raw_job = client.load_table_from_json(rows, table_raw.table_id, job_config=job_config)
-    raw_job.result()
-    if raw_job.errors:
-        raise ValueError(f"Job failed: {raw_job.errors}")
+    logging.info("load raw data")
+    raw_job = client.load_table_from_json(rows[:10], TABLE_ID_RAW, job_config=job_config)
+    try:
+        raw_job.result()
+    except Exception as e:
+        logging.info(f"err: {e}")
+        if raw_job.errors:
+            raise ValueError(f"Job failed: {raw_job.errors}")
+    logging.info("merge tables")
     insert_job = client.query(MERGE_QUERY)
     insert_job.result()
     if insert_job.errors:
         raise ValueError(f"Job failed: {insert_job.errors}")
+    logging.info("done")
