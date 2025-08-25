@@ -1,4 +1,6 @@
 import logging
+import pandas as pd
+
 from enum import EnumMeta, Enum
 
 from google.cloud import bigquery
@@ -61,7 +63,7 @@ class FieldTypeEnum(Enum):
     RANGE = "RANGE"
 
 
-fields = [
+FIELDS = [
     ("day", FieldTypeEnum.DATE, True),
     ("video_id", FieldTypeEnum.STRING, True),
     ("media_type", FieldTypeEnum.STRING, False),
@@ -88,13 +90,14 @@ PROJECT_NAME = "smart-data-platform-dev-401609"
 TABLE_ID_RAW = f"{PROJECT_NAME}.robin_custom.dailymotion_raw_data"
 TABLE_ID_DEF = f"{PROJECT_NAME}.robin_custom.dailymotion_default_data"
 TABLE_SCHEMA = [
-    bigquery.schema.SchemaField(name, field.value, mode=get_mode(mode)) for name, field, mode in fields
+    bigquery.schema.SchemaField(name, field.value, mode=get_mode(mode)) for name, field, mode in FIELDS
 ]
 MERGE_QUERY = f"""
-INSERT INTO `{TABLE_ID_DEF}` ({", ".join([f[0] for f in fields])})
-SELECT {", ".join([f[0] for f in fields])}
+INSERT INTO `{TABLE_ID_DEF}` ({", ".join([f[0] for f in FIELDS])})
+SELECT {", ".join([f[0] for f in FIELDS])}
 FROM `{TABLE_ID_RAW}`
 """
+CHUNK_SIZE = 500
 
 
 def get_or_create_table(client):
@@ -108,9 +111,21 @@ def get_or_create_table(client):
         return client.create_table(table_def), client.create_table(table_raw)
 
 
-def transfer(rows):
-    logging.info(f"Data type: {type(rows)}")
-    logging.info(f"First row: {rows[:10]}")
+def chunks(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
+
+
+def get_rows(df):
+    df["video_created_time"] = df["video_created_time"].dt.strftime("%Y-%m-%dT%H:%M:%S")
+    df = df.where(pd.notnull(df), None)
+    df = df[[field for field, _, __ in FIELDS]]
+    rows = df.to_dict(orient="records")
+    return rows
+
+
+def transfer(df):
+    rows = get_rows(df)
     client = bigquery.Client(project=PROJECT_NAME)
     table_def, table_raw = get_or_create_table(client)
     job_config = bigquery.LoadJobConfig(
@@ -119,16 +134,22 @@ def transfer(rows):
         source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON
     )
     logging.info("load raw data")
-    raw_job = client.load_table_from_json(rows[:10], TABLE_ID_RAW, job_config=job_config)
-    try:
-        raw_job.result()
-    except Exception as e:
-        logging.info(f"err: {e}")
-        if raw_job.errors:
-            raise ValueError(f"Job failed: {raw_job.errors}")
-    logging.info("merge tables")
-    insert_job = client.query(MERGE_QUERY)
-    insert_job.result()
-    if insert_job.errors:
-        raise ValueError(f"Job failed: {insert_job.errors}")
-    logging.info("done")
+    # ToDo: Individuare i caratteri che rompono l'inserimento
+    for chunk in chunks(rows, CHUNK_SIZE):
+        try:
+            raw_job = client.load_table_from_json(chunk, TABLE_ID_RAW, job_config=job_config)
+            try:
+                raw_job.result()
+            except Exception as e:
+                logging.info(f"err: {e}")
+                if raw_job.errors:
+                    raise ValueError(f"Job failed: {raw_job.errors} data sample: {chunk[:10]}")
+            logging.info("merge tables")
+            insert_job = client.query(MERGE_QUERY)
+            insert_job.result()
+            if insert_job.errors:
+                # raise ValueError(f"Job failed: {insert_job.errors}")
+                logging.info(f"Job failed: {insert_job.errors}")
+            logging.info("done")
+        except Exception as e:
+            logging.info(f"error: {e}")
