@@ -161,9 +161,9 @@ class DailyMotionDataHandle(object):
 
     def __refining(self, df:pd.DataFrame, **kwargs):
 
-
         df["video_created_time"] = (pd.to_datetime(df["video_created_time"], unit="s", utc=True)
             .dt.tz_convert('Europe/Rome'))
+
         """
         TODO: Questa variabile deve esserci ma le chiamate devono essere fatte con una dimanesione di date DAY non HOUR
             QUindi bisogna efettuare una chiamata con granularità HOUR e una DAY per l'entrate
@@ -182,6 +182,7 @@ if __name__ == "__main__":
         reportFile { reportToken }
       }
      }'''
+
     variables ={
         #TODO: inserire "ESTIMATED_EARNINGS_EUR" questa metrica deve essere fatta con un altra variabile perchè non
         # è supportata dalla segnetazione oraria ma solo da quella giornaliera o mensile
@@ -206,7 +207,6 @@ if __name__ == "__main__":
         }
     }
 
-    #TODO: costruire una query per le live
     auth = Authentication.from_credential(
         os.environ.get("DM_CLIENT_API"),
         os.environ.get("DM_CLIENT_SECRET"),
