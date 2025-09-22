@@ -466,7 +466,7 @@ class Authentication(object):
         return token
 
 
-class DailyMotion(object):
+class DailymotionClient(object):
     """
     DailyMotion API client for interacting with GraphQL endpoints and REST API.
 
@@ -724,3 +724,12 @@ class DailyMotion(object):
         )
 
         return query, variables
+
+__all__ = ['Authentication',
+           'DailymotionClient',
+           'DailymotionApiException',
+           'DailymotionAuthException',
+           'DailymotionClientException',
+           'DailymotionReportException',
+           'DailymotionTokenExpired'
+           ]
