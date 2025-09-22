@@ -1,22 +1,15 @@
 import datetime
-import logging, os, dotenv, time
+import logging, os, time
 from typing import Any
 import pandas as pd
-from DailyMotion import Authentication, DailyMotion
+from dailymotion import Authentication, DailymotionClient
 from bigquery_transfer import transfer
 
-logging.basicConfig(level=logging.INFO)
-
-
-# Check for environment files and load credentials
-# Priority: 1. .env.local, 2. .env
-if os.path.exists('.env.local'):
-    dotenv.load_dotenv('.env.local')
-elif os.path.exists('.env'):
-    dotenv.load_dotenv('.env')
-else:
-    logging.error("Environment file not found, create a .env or .env.local file with your credentials.")
-
+logging.basicConfig(
+    level=logging.DEBUG if bool(os.getenv("DEBUG", False)) else logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 
 class DailyMotionDataHandle(object):
     """A comprehensive data handler for DailyMotion analytics and content information.
@@ -28,20 +21,20 @@ class DailyMotionDataHandle(object):
 
      """
 
-    def __init__(self, daylimotion_client: DailyMotion, logger:logging.Logger = logging.getLogger(__name__)):
+    def __init__(self, client: DailymotionClient, logger:logging.Logger = logging.getLogger(__name__)):
         """Initialize the DailyMotion data handler with client and logging configuration.
 
         Sets up the handler with an authenticated API client and configures logging
         for operation tracking. Initializes internal data storage as an empty DataFrame.
 
         Args:
-            daylimotion_client (DailyMotion): Authenticated DailyMotion API client with
+            client (DailyMotionClient): Authenticated DailyMotion API client with
                                             valid OAuth tokens and required permissions
             logger (logging.Logger, optional): Logger instance for tracking operations,
                                              debugging, and error reporting. Uses module
                                              logger if not specified.
         """
-        self.__client = daylimotion_client
+        self.__client = client
         self.__logger = logger
         self.__data = pd.DataFrame()
 
@@ -222,7 +215,7 @@ if __name__ == "__main__":
         scope=['create_reports', 'delete_reports', 'manage_reports']
     )
 
-    data_handler = DailyMotionDataHandle(DailyMotion(auth))
+    data_handler = DailyMotionDataHandle(DailymotionClient(auth))
     data_handler.init(query, variables)
     df = data_handler.data.reset_index(drop=True)
     transfer(df)
