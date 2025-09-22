@@ -1,8 +1,9 @@
-import functools
+import functools, logging
 from json import JSONDecodeError
 import requests, json, os, time
 from typing import Self, Any, Literal, Generator
 
+log = logging.getLogger(__name__)
 
 ## Client Exception/Error
 
@@ -153,7 +154,10 @@ def _refresh_token_if_expired(func):
 
         # Check if the current token is expired and refresh it if needed
         if self.token.is_expired():
+            log.info('Token expired, refreshing...')
             self.token = auth.get_token()
+            log.debug(f'Token refreshed {self.token}')
+
             self._client.headers.update({
                 'Authorization': self.token.get_authorization()
             })
@@ -271,6 +275,8 @@ class Token(object):
         """
         return '%s %s' % (self.token_type, self.access_token)
 
+    def __repr__(self):
+        return f"Token( access_token = {self.access_token[:20]}..., refresh_token = {self.refresh_token}, expires_in = {self.expires_in}, scope = {self.scope}, token_type = {self.token_type})"
 
 class Authentication(object):
     """Handles DailyMotion API authentication using different OAuth2 flows.
@@ -504,7 +510,7 @@ class DailymotionClient(object):
         ```
     """
 
-    def __init__(self, authentication: Authentication):
+    def __init__(self, authentication: Authentication, **kwargs):
         """Initialize API client with authentication.
 
         Sets up the HTTP client session with proper headers and retrieves
@@ -515,6 +521,7 @@ class DailymotionClient(object):
         """
 
         self.__auth = authentication
+        self.logger = kwargs.get('logger', logging.getLogger(f"{__name__}.{__class__.__name__}"))
         # Retrieve initial token from authentication system
         self.token = self.__auth.get_token()
 
@@ -533,6 +540,7 @@ class DailymotionClient(object):
             'Content-Type': 'application/json',
             'Authorization': self.token.get_authorization() if self.token else ''
         })
+        self.logger.debug(f"Setting HTTP client with headers: {self._client.headers.get('Authorization')}")
 
     @_refresh_token_if_expired
     def graph_ql(self, *, query: str, variable: dict[str, Any]) -> dict[str, Any]:
@@ -555,6 +563,7 @@ class DailymotionClient(object):
         """
 
         try:
+            self.logger.debug(f"Execution graphql with: {{'query': {query},'variables': {variable}}}")
             response = self._client.post("%s" % (os.environ.get("DM_GRAPH_URL")),
                                          json={'query': query, 'variables': variable}).json()
 
@@ -590,6 +599,7 @@ class DailymotionClient(object):
         data_merged.update(kwargs.get('params', {}) if isinstance(kwargs.get('params', {}), dict) else {})
 
         try:
+            self.logger.debug(f"Execution rest with data: {data_merged | fields}")
             response = self._client.request(method='POST',
                                             url="%s/%s" % (os.environ.get("DM_REST_URL"), path.strip('/')),
                                             data=data_merged | fields,
@@ -637,14 +647,12 @@ class DailymotionClient(object):
         report_tokens = _recursive_search_key(response_tokens, 'reportToken')
 
         # Generate GraphQL query to poll for report completion status
-        automated_report_query, automated_report_variable = self.__generate_graphql_to_get_report_file_by_token(
-            list(report_tokens))
+        automated_report_query, automated_report_variable = self.__generate_graphql_to_get_report_file_by_token(list(report_tokens))
 
         iteration = 0
         report_link_response = {}
         # Implement polling loop with exponential backoff
-        while (kwargs.get('max_retry', 0) <= iteration) if kwargs.get(
-                'max_retry') else True:  # Infinite loop if max_retry not set
+        while (kwargs.get('max_retry', 0) <= iteration) if kwargs.get('max_retry') else True:  # Infinite loop if max_retry not set
 
             # Poll API for report status and download links
             report_link_response = self.graph_ql(query=automated_report_query, variable=automated_report_variable)
@@ -655,8 +663,9 @@ class DailymotionClient(object):
 
             # Apply exponential backoff delay before next polling attempt
             exponetial_delay = kwargs.get('delay', 1) * (2 ** iteration)
-            time.sleep(exponetial_delay)
             iteration += 1
+            self.logger.info(f"Report generation in progress, retrying iteration {iteration} in {exponetial_delay} seconds")
+            time.sleep(exponetial_delay)
 
         # Extract and return all download links from the final response
         return list(_recursive_search_key(report_link_response, 'link'))

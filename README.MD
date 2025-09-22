@@ -227,17 +227,17 @@ query = '''mutation Report($video: AskPartnerReportFileInput!) {
     reportFile { reportToken }
   }
  }'''
-variables ={
+variables = {
     "video": {
-      "metrics": [
-        ...
-      ],
-      "dimensions": [
-        ...
-      ],
-      "startDate": "2025-07-30",
-      "endDate": "2025-07-30",
-      "product": "CONTENT"
+        "metrics": [
+            ...
+        ],
+        "dimensions": [
+            ...
+        ],
+        "startDate": "2025-07-30",
+        "endDate": "2025-07-30",
+        "product": "CONTENT"
     }
 }
 
@@ -250,7 +250,7 @@ data_handler = DailyMotionDataHandle(
         )
     )
 )
-data_handler.init(query, variables)
+data_handler.fetch(query, variables)
 
 print(data_handler.data.tail())
 

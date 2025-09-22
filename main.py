@@ -7,7 +7,8 @@ from bigquery_transfer import transfer
 
 logging.basicConfig(
     level=logging.DEBUG if bool(os.getenv("DEBUG", False)) else logging.INFO,
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s" +
+           (" [\"%(pathname)s\" line %(lineno)d]" if os.getenv("DEBUG", False) else ""),
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
@@ -21,7 +22,7 @@ class DailyMotionDataHandle(object):
 
      """
 
-    def __init__(self, client: DailymotionClient, logger:logging.Logger = logging.getLogger(__name__)):
+    def __init__(self, client: DailymotionClient, logger:logging.Logger = None):
         """Initialize the DailyMotion data handler with client and logging configuration.
 
         Sets up the handler with an authenticated API client and configures logging
@@ -35,7 +36,7 @@ class DailyMotionDataHandle(object):
                                              logger if not specified.
         """
         self.__client = client
-        self.__logger = logger
+        self.__logger = logger if logger is not None else logging.getLogger(f"{__name__}.{__class__.__name__}")
         self.__data = pd.DataFrame()
 
     @property
@@ -56,7 +57,7 @@ class DailyMotionDataHandle(object):
        """
         return self.__data.copy()
 
-    def init(self, init_query:str, init_variables:dict[str, Any]) -> None:
+    def fetch(self, init_query:str, init_variables:dict[str, Any]) -> None:
         """Initialize and process the complete DailyMotion data pipeline.
 
         Orchestrates the full workflow of report generation, data extraction,
@@ -64,8 +65,6 @@ class DailyMotionDataHandle(object):
         the private methods to produce a final enriched dataset.
         """
 
-        self.__logger.info("Initializing data")
-        self.__logger.info("...")
         self.__fetch_main_data_form_graphql(init_query, init_variables)
 
         self.__logger.info("Fetch details from REST API for video, playlist, player IDs")
@@ -74,7 +73,7 @@ class DailyMotionDataHandle(object):
             'playlist': self.__fetch_details_from_rest('playlist', self.data['playlist_id'].dropna().unique(), ['id', 'name']),
             'player': self.__fetch_details_from_rest('player', self.data['player_id'].dropna().unique(), ['id', 'label'])
         }
-        logging.info(self.__data.columns.tolist())
+        self.__logger.info(self.__data.columns.tolist())
         # Iterate over each unique, non-null playlist ID
         # LEFT JOIN (sql) to merge the dataframe
         merged_df = self.data
@@ -108,7 +107,7 @@ class DailyMotionDataHandle(object):
 
         # Execute the GraphQL report mutation and get the list of CSV report download links
         report_links = self.__client.get_report_file(query=query, variable=variables)
-        logging.info(f"report links: {report_links}")
+        self.__logger.info(f"report links: {report_links}")
 
         # If multiple tokens are returned, each link corresponds to a token.
         # You may enhance logic here to handle tokens + variable mapping if needed
@@ -163,9 +162,8 @@ class DailyMotionDataHandle(object):
 
     def __refining(self, df:pd.DataFrame, **kwargs):
 
-        df["video_created_time"] = (pd.to_datetime(df["video_created_time"], unit="s", utc=True)
-            .dt.tz_convert('Europe/Rome'))
-
+        df["video_created_time"] = (pd.to_datetime(df["video_created_time"], unit="s", utc=True).dt.tz_convert('Europe/Rome'))
+        print(df["video_created_time"] )
         """
         TODO: Questa variabile deve esserci ma le chiamate devono essere fatte con una dimanesione di date DAY non HOUR
             QUindi bisogna efettuare una chiamata con granularità HOUR e una DAY per l'entrate
@@ -216,7 +214,7 @@ if __name__ == "__main__":
     )
 
     data_handler = DailyMotionDataHandle(DailymotionClient(auth))
-    data_handler.init(query, variables)
+    data_handler.fetch(query, variables)
     df = data_handler.data.reset_index(drop=True)
     transfer(df)
     logging.info("Executed in %d seconds" % (time.time() - start_time) )
