@@ -145,6 +145,7 @@ class DailyMotionDataHandle(object):
         """ WARNING:
         2nd Massive blocking time
         """
+        #TODO: Make this with async httpx
         for item_id in ids:  # every id (unique)
             try:
                 # Fetch details via REST API
@@ -162,8 +163,11 @@ class DailyMotionDataHandle(object):
 
     def __refining(self, df:pd.DataFrame, **kwargs):
 
-        df["video_created_time"] = (pd.to_datetime(df["video_created_time"], unit="s", utc=True).dt.tz_convert('Europe/Rome'))
-        print(df["video_created_time"] )
+        df["video_created_time"] = (pd.to_datetime(df["video_created_time"], unit="s", utc=True)
+                                    .dt.tz_convert('Europe/Rome')
+                                    .dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+                                    )
+
         """
         TODO: Questa variabile deve esserci ma le chiamate devono essere fatte con una dimanesione di date DAY non HOUR
             QUindi bisogna efettuare una chiamata con granularità HOUR e una DAY per l'entrate
@@ -208,8 +212,8 @@ if __name__ == "__main__":
     }
 
     auth = Authentication.from_credential(
-        os.environ.get("DM_CLIENT_API"),
-        os.environ.get("DM_CLIENT_SECRET"),
+        os.getenv("DM_CLIENT_API"),
+        os.getenv("DM_CLIENT_SECRET"),
         scope=['create_reports', 'delete_reports', 'manage_reports']
     )
 
