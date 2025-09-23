@@ -76,7 +76,7 @@ class DailymotionReportException(DailymotionClientException):
 
 ## Utility functions
 
-def _recursive_search_key(node: dict | list, key: str) -> Generator:
+def recursive_search_key(node: dict | list, key: str) -> Generator:
     """Recursively search for all values of a given key in nested data structures.
 
     Traverses nested dictionaries and lists to find all occurrences of a specific
@@ -106,11 +106,11 @@ def _recursive_search_key(node: dict | list, key: str) -> Generator:
         for dict_key, dict_value in node.items():
             if dict_key == key:
                 yield dict_value
-            yield from _recursive_search_key(dict_value, key)
+            yield from recursive_search_key(dict_value, key)
 
     elif isinstance(node, list):
         for item in node:
-            yield from _recursive_search_key(item, key)
+            yield from recursive_search_key(item, key)
 
 def _refresh_token_if_expired(func):
     """Decorator that checks if the token is expired and refreshes it before executing the decorated method.
@@ -644,7 +644,7 @@ class DailymotionClient(object):
         response_tokens = self.graph_ql(query=query, variable=variable)
 
         # Extract all report tokens from the nested response structure
-        report_tokens = _recursive_search_key(response_tokens, 'reportToken')
+        report_tokens = recursive_search_key(response_tokens, 'reportToken')
 
         # Generate GraphQL query to poll for report completion status
         automated_report_query, automated_report_variable = self.__generate_graphql_to_get_report_file_by_token(list(report_tokens))
@@ -658,7 +658,7 @@ class DailymotionClient(object):
             report_link_response = self.graph_ql(query=automated_report_query, variable=automated_report_variable)
 
             # Check if any reports are still in progress
-            if 'IN_PROGRESS' not in tuple(_recursive_search_key(report_link_response, 'status')):
+            if 'IN_PROGRESS' not in tuple(recursive_search_key(report_link_response, 'status')):
                 break
 
             # Apply exponential backoff delay before next polling attempt
@@ -668,7 +668,7 @@ class DailymotionClient(object):
             time.sleep(exponetial_delay)
 
         # Extract and return all download links from the final response
-        return list(_recursive_search_key(report_link_response, 'link'))
+        return list(recursive_search_key(report_link_response, 'link'))
 
     @staticmethod
     def __generate_graphql_to_get_report_file_by_token(tokens: list[str]) -> tuple[str, dict[Any, Any]]:

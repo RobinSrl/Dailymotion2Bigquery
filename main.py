@@ -1,8 +1,10 @@
+import asyncio
 import datetime
 import logging, os, time
+from functools import partial
 from typing import Any
 import pandas as pd
-from dailymotion import Authentication, DailymotionClient
+from dailymotion import Authentication, DailymotionClient, recursive_search_key
 from bigquery_transfer import transfer
 
 logging.basicConfig(
@@ -12,6 +14,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
+MAX_CONCURRENCY = 10
 class DailyMotionDataHandle(object):
     """A comprehensive data handler for DailyMotion analytics and content information.
 
@@ -66,12 +69,13 @@ class DailyMotionDataHandle(object):
         """
 
         self.__fetch_main_data_form_graphql(init_query, init_variables)
+        self.cluster_data_by_day()
 
         self.__logger.info("Fetch details from REST API for video, playlist, player IDs")
         df_info_from_id={
-            'video': self.__fetch_details_from_rest('video', self.data['video_id'].dropna().unique(), ['id', 'title', 'description', 'duration', 'created_time', 'tags', 'url']),
-            'playlist': self.__fetch_details_from_rest('playlist', self.data['playlist_id'].dropna().unique(), ['id', 'name']),
-            'player': self.__fetch_details_from_rest('player', self.data['player_id'].dropna().unique(), ['id', 'label'])
+            'video': self.async_fetch_rest_details_by_id('video', self.data['video_id'].dropna().unique(), ['id', 'title', 'description', 'duration', 'created_time', 'tags', 'url']),
+            'playlist': self.async_fetch_rest_details_by_id('playlist', self.data['playlist_id'].dropna().unique(), ['id', 'name']),
+            'player': self.async_fetch_rest_details_by_id('player', self.data['player_id'].dropna().unique(), ['id', 'label'])
         }
         self.__logger.info(self.__data.columns.tolist())
         # Iterate over each unique, non-null playlist ID
@@ -83,11 +87,15 @@ class DailyMotionDataHandle(object):
 
         if df_info_from_id['playlist'] is not None and not df_info_from_id['playlist'].empty and 'playlist_id' in merged_df.columns.tolist():
             merged_df = merged_df.merge(df_info_from_id['playlist'], on='playlist_id', how='left')
+        else:
+            merged_df['playlist_name'] = pd.NA  # if there is no playlist_id in the cluster_df, fill playlist_name with NaN
 
         if df_info_from_id['player'] is not None and not df_info_from_id['player'].empty and 'player_id' in merged_df.columns.tolist():
             merged_df = merged_df.merge(df_info_from_id['player'], on='player_id', how='left')
+        else:
+            merged_df['player_label'] = pd.NA  # if there is no player_id in the cluster_df, fill player_label with NaN
 
-        self.__refining(merged_df)
+        self.__data = self.__refining(merged_df)
 
     def __fetch_main_data_form_graphql(self, query: str, variables: dict[str, Any]) -> None:
         """
@@ -161,20 +169,97 @@ class DailyMotionDataHandle(object):
                 continue
         return dataframe_fetched_by_ids.add_prefix("%s_" % name.lower())
 
-    def __refining(self, df:pd.DataFrame, **kwargs):
+    def async_fetch_rest_details_by_id(self, name: str, ids: list[str], fields: list[str]) -> pd.DataFrame:
+        async def async_wrapper():
+            # Crea un semaforo per limitare la concorrenza
+            semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 
-        df["video_created_time"] = (pd.to_datetime(df["video_created_time"], unit="s", utc=True)
-                                    .dt.tz_convert('Europe/Rome')
-                                    .dt.strftime("%Y-%m-%dT%H:%M:%S%z")
-                                    )
+            async def fetch_single_item(item_id: str) -> dict | None:
+                """Fetch details per un singolo item con controllo della concorrenza"""
+                async with semaphore:
+                    try:
+                        # Esegue la chiamata sincrona in un thread separato
+                        loop = asyncio.get_event_loop()
+                        rest_response = await loop.run_in_executor(
+                            None,  # Usa il default ThreadPoolExecutor
+                            partial(
+                                self.__client.rest,
+                                f"{name.strip().strip('/').lower()}/{item_id.strip('/')}",
+                                fields=fields
+                            )
+                        )
+                        return rest_response
+                    except Exception as e:
+                        logging.warning(f"Warning on {name} with id {item_id}:\n\t{e}")
+                        return None
 
-        """
-        TODO: Questa variabile deve esserci ma le chiamate devono essere fatte con una dimanesione di date DAY non HOUR
-            QUindi bisogna efettuare una chiamata con granularità HOUR e una DAY per l'entrate
-        """
-        df["estimated_earings_eur"] = None
+            # Crea tutte le task per le richieste
+            tasks = [fetch_single_item(item_id) for item_id in ids]
 
-        self.__data = df
+            # Esegue tutte le richieste in parallelo
+            results = await asyncio.gather(*tasks, return_exceptions=False)
+
+            # Filtra i risultati validi (non None) e crea il DataFrame
+            valid_results = [result for result in results if result is not None]
+
+            if valid_results:
+                dataframe_fetched_by_ids = pd.DataFrame(valid_results)
+            else:
+                dataframe_fetched_by_ids = pd.DataFrame()
+
+            return dataframe_fetched_by_ids.add_prefix("%s_" % name.lower())
+
+        # Esegue il wrapper asincrono e restituisce il risultato
+        return asyncio.run(async_wrapper())
+
+    def __refining(self, df:pd.DataFrame) -> pd.DataFrame:
+        if 'video_created_time' in df.columns:
+            df["video_created_time"] = pd.to_datetime(df["video_created_time"], unit="s",
+                                                             utc=True).dt.tz_convert(
+                'Europe/Rome').dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+        if 'video_media_type' in df.columns:
+            df.rename(columns={'video_media_type': 'media_type'}, inplace=True)
+
+        # if 'view_through_rate' in df.columns:
+        #     # convert view_through_rate from percentage to decimal
+        #     df['view_through_rate'] = df['view_through_rate'] / 100
+
+        if not 'estimated_earnings_eur' in df.columns:
+            df['estimated_earnings_eur'] = pd.NA
+
+        return df.sort_values(by=['day', 'video_id'])
+
+    def __safe_data_clustering(self, group_by: list[str] | str, aggregation: dict[str, str] = None) -> pd.DataFrame:
+
+        # Create copy and fill NaN with -1
+        df_copy = self.__data.fillna(-1)
+
+        # Group data and aggregate
+        df_grouped = (df_copy
+                      .groupby(group_by)
+                      .agg(aggregation if aggregation is not None else {})
+                      .reset_index())
+
+        return df_grouped.replace(-1, None)
+
+    def cluster_data_by_day(self):
+        if 'hour' in self.__data.columns:
+            # convert datetime in UTC into Date with timezone Europe/Rome
+            self.__data['hour'] = pd.to_datetime(self.__data['hour'], utc=True, errors='coerce').dt.tz_convert(
+                'Europe/Rome').dt.date
+
+        dimension = recursive_search_key(variables, 'dimensions')
+        dimension = list(dict.fromkeys([item.lower() for sublist in dimension for item in sublist]))
+        dimension = [dim for dim in dimension if dim in self.__data.columns]
+
+        # grouping data by day
+        self.__data = self.__safe_data_clustering(dimension, {'views': 'sum', 'time_watched_seconds': 'sum',
+                                                              'view_through_rate': 'mean'})
+
+        if 'hour' in self.__data.columns:
+            self.__data.rename(columns={'hour': 'day'}, inplace=True)
+
 
 
 start_time = time.time()
@@ -191,13 +276,13 @@ if __name__ == "__main__":
         #TODO: inserire "ESTIMATED_EARNINGS_EUR" questa metrica deve essere fatta con un altra variabile perchè non
         # è supportata dalla segnetazione oraria ma solo da quella giornaliera o mensile
         "video": {
-          "metrics": [
-            "VIEWS",
-            "TIME_WATCHED_SECONDS",
-            "VIEW_THROUGH_RATE"
-          ],
+              "metrics": [
+                "VIEWS",
+                "TIME_WATCHED_SECONDS",
+                "VIEW_THROUGH_RATE"
+              ],
               "dimensions": [
-                "DAY",
+                "HOUR",
                 "VIDEO_ID",
                 "MEDIA_TYPE",
                 "VISITOR_PAGE_URL", #estrarre subdomain in viste
@@ -207,7 +292,7 @@ if __name__ == "__main__":
               ],
               "startDate": yesterday_date.strftime('%Y-%m-%d'),
               "endDate": yesterday_date.strftime('%Y-%m-%d'),
-              "product": "CONTENT"
+              "product": "ALL"
         }
     }
 
