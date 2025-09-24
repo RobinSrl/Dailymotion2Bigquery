@@ -1,23 +1,20 @@
+import asyncio
 import datetime
-import logging, os, dotenv, time
+import logging, os, time
+from functools import partial
 from typing import Any
 import pandas as pd
-from DailyMotion import Authentication, DailyMotion
+from dailymotion import Authentication, DailymotionClient, recursive_search_key
 from bigquery_transfer import transfer
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.DEBUG if bool(os.getenv("DEBUG", False)) else logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s" +
+           (" [\"%(pathname)s\" line %(lineno)d]" if os.getenv("DEBUG", False) else ""),
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 
-
-# Check for environment files and load credentials
-# Priority: 1. .env.local, 2. .env
-if os.path.exists('.env.local'):
-    dotenv.load_dotenv('.env.local')
-elif os.path.exists('.env'):
-    dotenv.load_dotenv('.env')
-else:
-    logging.error("Environment file not found, create a .env or .env.local file with your credentials.")
-
-
+MAX_CONCURRENCY = 10
 class DailyMotionDataHandle(object):
     """A comprehensive data handler for DailyMotion analytics and content information.
 
@@ -28,21 +25,21 @@ class DailyMotionDataHandle(object):
 
      """
 
-    def __init__(self, daylimotion_client: DailyMotion, logger:logging.Logger = logging.getLogger(__name__)):
+    def __init__(self, client: DailymotionClient, logger:logging.Logger = None):
         """Initialize the DailyMotion data handler with client and logging configuration.
 
         Sets up the handler with an authenticated API client and configures logging
         for operation tracking. Initializes internal data storage as an empty DataFrame.
 
         Args:
-            daylimotion_client (DailyMotion): Authenticated DailyMotion API client with
+            client (DailyMotionClient): Authenticated DailyMotion API client with
                                             valid OAuth tokens and required permissions
             logger (logging.Logger, optional): Logger instance for tracking operations,
                                              debugging, and error reporting. Uses module
                                              logger if not specified.
         """
-        self.__client = daylimotion_client
-        self.__logger = logger
+        self.__client = client
+        self.__logger = logger if logger is not None else logging.getLogger(f"{__name__}.{__class__.__name__}")
         self.__data = pd.DataFrame()
 
     @property
@@ -63,7 +60,7 @@ class DailyMotionDataHandle(object):
        """
         return self.__data.copy()
 
-    def init(self, init_query:str, init_variables:dict[str, Any]) -> None:
+    def fetch(self, init_query:str, init_variables:dict[str, Any]) -> None:
         """Initialize and process the complete DailyMotion data pipeline.
 
         Orchestrates the full workflow of report generation, data extraction,
@@ -71,17 +68,16 @@ class DailyMotionDataHandle(object):
         the private methods to produce a final enriched dataset.
         """
 
-        self.__logger.info("Initializing data")
-        self.__logger.info("...")
         self.__fetch_main_data_form_graphql(init_query, init_variables)
+        self.cluster_data_by_day()
 
         self.__logger.info("Fetch details from REST API for video, playlist, player IDs")
         df_info_from_id={
-            'video': self.__fetch_details_from_rest('video', self.data['video_id'].dropna().unique(), ['id', 'title', 'description', 'duration', 'created_time', 'tags', 'url']),
-            'playlist': self.__fetch_details_from_rest('playlist', self.data['playlist_id'].dropna().unique(), ['id', 'name']),
-            'player': self.__fetch_details_from_rest('player', self.data['player_id'].dropna().unique(), ['id', 'label'])
+            'video': self.async_fetch_rest_details_by_id('video', self.data['video_id'].dropna().unique(), ['id', 'title', 'description', 'duration', 'created_time', 'tags', 'url']),
+            'playlist': self.async_fetch_rest_details_by_id('playlist', self.data['playlist_id'].dropna().unique(), ['id', 'name']),
+            'player': self.async_fetch_rest_details_by_id('player', self.data['player_id'].dropna().unique(), ['id', 'label'])
         }
-        logging.info(self.__data.columns.tolist())
+        self.__logger.info(self.__data.columns.tolist())
         # Iterate over each unique, non-null playlist ID
         # LEFT JOIN (sql) to merge the dataframe
         merged_df = self.data
@@ -91,11 +87,15 @@ class DailyMotionDataHandle(object):
 
         if df_info_from_id['playlist'] is not None and not df_info_from_id['playlist'].empty and 'playlist_id' in merged_df.columns.tolist():
             merged_df = merged_df.merge(df_info_from_id['playlist'], on='playlist_id', how='left')
+        else:
+            merged_df['playlist_name'] = pd.NA  # if there is no playlist_id in the cluster_df, fill playlist_name with NaN
 
         if df_info_from_id['player'] is not None and not df_info_from_id['player'].empty and 'player_id' in merged_df.columns.tolist():
             merged_df = merged_df.merge(df_info_from_id['player'], on='player_id', how='left')
+        else:
+            merged_df['player_label'] = pd.NA  # if there is no player_id in the cluster_df, fill player_label with NaN
 
-        self.__refining(merged_df)
+        self.__data = self.__refining(merged_df)
 
     def __fetch_main_data_form_graphql(self, query: str, variables: dict[str, Any]) -> None:
         """
@@ -115,7 +115,7 @@ class DailyMotionDataHandle(object):
 
         # Execute the GraphQL report mutation and get the list of CSV report download links
         report_links = self.__client.get_report_file(query=query, variable=variables)
-        logging.info(f"report links: {report_links}")
+        self.__logger.info(f"report links: {report_links}")
 
         # If multiple tokens are returned, each link corresponds to a token.
         # You may enhance logic here to handle tokens + variable mapping if needed
@@ -153,6 +153,7 @@ class DailyMotionDataHandle(object):
         """ WARNING:
         2nd Massive blocking time
         """
+        #TODO: Make this with async httpx
         for item_id in ids:  # every id (unique)
             try:
                 # Fetch details via REST API
@@ -168,18 +169,97 @@ class DailyMotionDataHandle(object):
                 continue
         return dataframe_fetched_by_ids.add_prefix("%s_" % name.lower())
 
-    def __refining(self, df:pd.DataFrame, **kwargs):
+    def async_fetch_rest_details_by_id(self, name: str, ids: list[str], fields: list[str]) -> pd.DataFrame:
+        async def async_wrapper():
+            # Crea un semaforo per limitare la concorrenza
+            semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 
+            async def fetch_single_item(item_id: str) -> dict | None:
+                """Fetch details per un singolo item con controllo della concorrenza"""
+                async with semaphore:
+                    try:
+                        # Esegue la chiamata sincrona in un thread separato
+                        loop = asyncio.get_event_loop()
+                        rest_response = await loop.run_in_executor(
+                            None,  # Usa il default ThreadPoolExecutor
+                            partial(
+                                self.__client.rest,
+                                f"{name.strip().strip('/').lower()}/{item_id.strip('/')}",
+                                fields=fields
+                            )
+                        )
+                        return rest_response
+                    except Exception as e:
+                        logging.warning(f"Warning on {name} with id {item_id}:\n\t{e}")
+                        return None
 
-        df["video_created_time"] = (pd.to_datetime(df["video_created_time"], unit="s", utc=True)
-            .dt.tz_convert('Europe/Rome'))
-        """
-        TODO: Questa variabile deve esserci ma le chiamate devono essere fatte con una dimanesione di date DAY non HOUR
-            QUindi bisogna efettuare una chiamata con granularità HOUR e una DAY per l'entrate
-        """
-        df["estimated_earings_eur"] = None
+            # Crea tutte le task per le richieste
+            tasks = [fetch_single_item(item_id) for item_id in ids]
 
-        self.__data = df
+            # Esegue tutte le richieste in parallelo
+            results = await asyncio.gather(*tasks, return_exceptions=False)
+
+            # Filtra i risultati validi (non None) e crea il DataFrame
+            valid_results = [result for result in results if result is not None]
+
+            if valid_results:
+                dataframe_fetched_by_ids = pd.DataFrame(valid_results)
+            else:
+                dataframe_fetched_by_ids = pd.DataFrame()
+
+            return dataframe_fetched_by_ids.add_prefix("%s_" % name.lower())
+
+        # Esegue il wrapper asincrono e restituisce il risultato
+        return asyncio.run(async_wrapper())
+
+    def __refining(self, df:pd.DataFrame) -> pd.DataFrame:
+        if 'video_created_time' in df.columns:
+            df["video_created_time"] = pd.to_datetime(df["video_created_time"], unit="s",
+                                                             utc=True).dt.tz_convert(
+                'Europe/Rome').dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+        if 'video_media_type' in df.columns:
+            df.rename(columns={'video_media_type': 'media_type'}, inplace=True)
+
+        # if 'view_through_rate' in df.columns:
+        #     # convert view_through_rate from percentage to decimal
+        #     df['view_through_rate'] = df['view_through_rate'] / 100
+
+        if not 'estimated_earnings_eur' in df.columns:
+            df['estimated_earnings_eur'] = pd.NA
+
+        return df.sort_values(by=['day', 'video_id'])
+
+    def __safe_data_clustering(self, group_by: list[str] | str, aggregation: dict[str, str] = None) -> pd.DataFrame:
+
+        # Create copy and fill NaN with -1
+        df_copy = self.__data.fillna(-1)
+
+        # Group data and aggregate
+        df_grouped = (df_copy
+                      .groupby(group_by)
+                      .agg(aggregation if aggregation is not None else {})
+                      .reset_index())
+
+        return df_grouped.replace(-1, None)
+
+    def cluster_data_by_day(self):
+        if 'hour' in self.__data.columns:
+            # convert datetime in UTC into Date with timezone Europe/Rome
+            self.__data['hour'] = pd.to_datetime(self.__data['hour'], utc=True, errors='coerce').dt.tz_convert(
+                'Europe/Rome').dt.date
+
+        dimension = recursive_search_key(variables, 'dimensions')
+        dimension = list(dict.fromkeys([item.lower() for sublist in dimension for item in sublist]))
+        dimension = [dim for dim in dimension if dim in self.__data.columns]
+
+        # grouping data by day
+        self.__data = self.__safe_data_clustering(dimension, {'views': 'sum', 'time_watched_seconds': 'sum',
+                                                              'view_through_rate': 'mean'})
+
+        if 'hour' in self.__data.columns:
+            self.__data.rename(columns={'hour': 'day'}, inplace=True)
+
 
 
 start_time = time.time()
@@ -191,17 +271,18 @@ if __name__ == "__main__":
         reportFile { reportToken }
       }
      }'''
+
     variables ={
         #TODO: inserire "ESTIMATED_EARNINGS_EUR" questa metrica deve essere fatta con un altra variabile perchè non
         # è supportata dalla segnetazione oraria ma solo da quella giornaliera o mensile
         "video": {
-          "metrics": [
-            "VIEWS",
-            "TIME_WATCHED_SECONDS",
-            "VIEW_THROUGH_RATE"
-          ],
+              "metrics": [
+                "VIEWS",
+                "TIME_WATCHED_SECONDS",
+                "VIEW_THROUGH_RATE"
+              ],
               "dimensions": [
-                "DAY",
+                "HOUR",
                 "VIDEO_ID",
                 "MEDIA_TYPE",
                 "VISITOR_PAGE_URL", #estrarre subdomain in viste
@@ -211,19 +292,18 @@ if __name__ == "__main__":
               ],
               "startDate": yesterday_date.strftime('%Y-%m-%d'),
               "endDate": yesterday_date.strftime('%Y-%m-%d'),
-              "product": "CONTENT"
+              "product": "ALL"
         }
     }
 
-    #TODO: costruire una query per le live
     auth = Authentication.from_credential(
-        os.environ.get("DM_CLIENT_API"),
-        os.environ.get("DM_CLIENT_SECRET"),
+        os.getenv("DM_CLIENT_API"),
+        os.getenv("DM_CLIENT_SECRET"),
         scope=['create_reports', 'delete_reports', 'manage_reports']
     )
 
-    data_handler = DailyMotionDataHandle(DailyMotion(auth))
-    data_handler.init(query, variables)
+    data_handler = DailyMotionDataHandle(DailymotionClient(auth))
+    data_handler.fetch(query, variables)
     df = data_handler.data.reset_index(drop=True)
     transfer(df)
     logging.info("Executed in %d seconds" % (time.time() - start_time) )
