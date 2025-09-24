@@ -214,9 +214,7 @@ class DailyMotionDataHandle(object):
 
     def __refining(self, df:pd.DataFrame) -> pd.DataFrame:
         if 'video_created_time' in df.columns:
-            df["video_created_time"] = pd.to_datetime(df["video_created_time"], unit="s",
-                                                             utc=True).dt.tz_convert(
-                'Europe/Rome').dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+            df["video_created_time"] = pd.to_datetime(df["video_created_time"], unit="s", utc=True)
 
         if 'video_media_type' in df.columns:
             df.rename(columns={'video_media_type': 'media_type'}, inplace=True)
