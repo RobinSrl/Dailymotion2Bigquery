@@ -81,7 +81,8 @@ FIELDS = [
     ("video_tags", FieldTypeEnum.STRING, list),
     ("video_url", FieldTypeEnum.STRING, False),
     ("player_label", FieldTypeEnum.STRING, False),
-    ("estimated_earnings_eur", FieldTypeEnum.NUMERIC, False)
+    ("estimated_earnings_eur", FieldTypeEnum.NUMERIC, False),
+    ("playlist_name", FieldTypeEnum.STRING, False)
 ]
 
 
