@@ -1,13 +1,47 @@
+"""
+Slack Chat Module - Notification and Error Handling Utilities
+This module provides utilities for sending messages to Slack channels and handling exceptions:
+
+Main functions:
+- send(message, **kwargs): Sends a message to a Slack channel
+- notify(): Decorator for exception handling and Slack notifications or alias of send()
+- notify_on_exception(): Decorator for detailed exception handling
+- notify_on_logging(): Decorator for logging notifications (TODO)
+
+The module requires SLACK_BOT_TOKEN and SLACK_CHANNEL environment variables to be set.
+
+Examples:
+    Simple message sending:
+        >>> from slack_chat import send, notify
+        >>> notify("Hello World!")
+        >>> send("Hello World!")
+
+    Using as exception handler:
+        >>> @notify
+        ... def risky_operation():
+        ...     raise ValueError("Something went wrong")
+
+    Detailed exception handling:
+        >>> @notify_on_exception(silent=True, message="Custom error message") # == @notify(silent=True, message="Custom error message")
+        ... def another_risky_operation():
+        ...     raise ValueError("Another error")
+        >>>
+
+    Using with custom message formatting:
+        >>> notify("hello world", strip=" ", replace=("hello", "hi"))
+        # Sends: "Hi world"
+
+"""
 from typing import Callable, Any, Optional
 import functools, os, logging, traceback
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
-log = logging.getLogger(__name__)
+_log = logging.getLogger(__name__)
 
-def prepare_message(text:str, **kwargs):
+def _prepare_message(text:str, **kwargs):
     text = text.strip(kwargs.get("strip", None))
-    text = text[0].upper() + text[1:]
+    text = text[0].upper() + text[1:] if len(text) > 0 else text
 
     if kwargs.get("replace") and isinstance(kwargs.get("replace"),tuple) and len(kwargs.get("replace")) == 2:
         old, new = kwargs.get("replace")
@@ -17,13 +51,14 @@ def prepare_message(text:str, **kwargs):
         text = kwargs.get("_func")(text)
         if text is None:
             raise TypeError(f"Function {kwargs.get('_func')} returned None instead of str")
+
     return text
 
 def send(message:str, **kwargs):
     # Initialize Slack client with token
     client = WebClient(token=os.getenv("SLACK_BOT_TOKEN"))
 
-    message = prepare_message(message, _func=kwargs.pop('_func', None), **kwargs)
+    message = _prepare_message(message, _func=kwargs.pop('_func', None), **kwargs)
 
     try:
         response = client.chat_postMessage(
@@ -31,12 +66,12 @@ def send(message:str, **kwargs):
             text=message,
             **kwargs
         )
-        log.debug(response)
+        _log.debug(response)
         if response.get("ok"):
-            log.info(f"Message sent to channelID {response.get('channel')}")
+            _log.info(f"Message sent to channelID {response.get('channel')}")
         return True
     except SlackApiError as e:
-        log.exception(f"Error sending message:\n{e.response['error']}")
+        _log.exception(f"Error sending message:\n{e.response['error']}")
         return False
 
 
@@ -44,8 +79,8 @@ def send(message:str, **kwargs):
 def notify_on_exception(func: Callable,
                         *,
                         silent:Optional[bool]=False,
-                        suppress:Optional[bool]=False,
-                        message:Optional[str]="") -> Callable:
+                        message:Optional[str]="",
+                        **message_kwargs) -> Callable:
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs) -> Any:
@@ -67,25 +102,23 @@ def notify_on_exception(func: Callable,
             error_msg += f"\t```{str(e)}\n{message}```\n"
 
             try:
-                send(error_msg)
+                send(error_msg, **message_kwargs)
             except Exception as e:
-                log.exception(f"Error sending error message:\n{e}")
-            if not silent and not suppress:
+                _log.exception(f"Error sending error message:\n{e}")
+            if not silent:
                 raise
 
     return wrapper
 
 def notify_on_logging(func: Callable,
                       *,
-                      level: int = logging.ERROR
-                      ) -> Callable:
-    #TODO: Crea la funzione per intercettare e inviare il logg
-    pass
+                      level: int = logging.ERROR,
+                      **message_kwargs) -> Callable:
+    #TODO: Crea la funzione per intercettare e inviare il log
+    raise NotImplementedError("The notify_on_logging function is not yet implemented")
 
-
-def notify(_function:Callable, **kwargs):
-
-    def decorator(function:Callable) -> Callable:
+def _notify_decorator(func: Callable, **kwargs) -> Callable:
+    def decorator(function: Callable) -> Callable:
         original_function = function
         # if kwargs.pop("on_log", True):
         #     original_function = notify_on_logging(function, **kwargs)
@@ -93,7 +126,19 @@ def notify(_function:Callable, **kwargs):
         original_function = notify_on_exception(original_function, **kwargs)
         return original_function
 
-    if _function is not None:
-        return decorator(_function)
-
+    if func is not None:
+        return decorator(func)
     return decorator
+
+@notify_on_exception
+def notify(_: Callable | str = None, **kwargs):
+    if _ is None or (isinstance(_, Callable) and callable(_)):
+        return _notify_decorator(func=_, **kwargs)
+
+    elif isinstance(_, str):
+        if _ and _.strip() != "" and not _.isspace():
+            return send(_, **kwargs)
+        _log.warning('The sting must not be empty or only whitespaces')
+        return None
+    else:
+        raise TypeError(f"This decorator accepts only Callable or str as argument not {type(_)} ")
