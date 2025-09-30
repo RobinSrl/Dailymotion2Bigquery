@@ -224,9 +224,13 @@ class DailyMotionDataHandle(object):
         #     df['view_through_rate'] = df['view_through_rate'] / 100
 
         if not 'estimated_earnings_eur' in df.columns:
-            df['estimated_earnings_eur'] = 0
+            df['estimated_earnings_eur'] = "0"
 
-        df['day'] = df['day'].dt.strftime('%Y-%m-%d')
+        df['video_duration'] = df['video_duration'].fillna(0).astype(int)
+
+        df['day'] = pd.to_datetime(df['day']).dt.strftime('%Y-%m-%d')
+
+        return df.sort_values(by=['day', 'video_id'])
 
     def __safe_data_clustering(self, group_by: list[str] | str, aggregation: dict[str, str] = None) -> pd.DataFrame:
 
