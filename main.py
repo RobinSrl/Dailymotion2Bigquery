@@ -224,7 +224,9 @@ class DailyMotionDataHandle(object):
         #     df['view_through_rate'] = df['view_through_rate'] / 100
 
         if not 'estimated_earnings_eur' in df.columns:
-            df['estimated_earnings_eur'] = 0
+            df['estimated_earnings_eur'] = "0"
+
+        df['video_duration'] = df['video_duration'].fillna(0).astype(int)
 
         df['day'] = pd.to_datetime(df['day']).dt.strftime('%Y-%m-%d')
 
