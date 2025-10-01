@@ -314,7 +314,7 @@ if __name__ == "__main__":
     data_handler.fetch(query, variables)
     df = data_handler.data.reset_index(drop=True)
 
-    # notify_on_exception(transfer)(df)
+    notify_on_exception(transfer)(df)
 
     notify(f"_{len(df)} records_ sono stati trasferiti su "
            f"<https://console.cloud.google.com/bigquery?project=smart-data-platform-dev-401609&ws=!1m9!1m3!3m2!1ssmart-data-platform-dev-401609!2scustom!1m4!4m3!1ssmart-data-platform-dev-401609!2srobin_custom!3sdailymotion_default_data&inv=1&invt=AbkQ8g|BigQuery>"

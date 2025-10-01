@@ -118,7 +118,6 @@ def chunks(lst, n):
 
 
 def get_rows(df):
-
     df = df.where(pd.notnull(df), None)
     df = df[[field for field, _, __ in FIELDS]]
     rows = df.to_dict(orient="records")
