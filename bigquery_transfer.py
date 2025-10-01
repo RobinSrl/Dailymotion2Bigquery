@@ -118,7 +118,7 @@ def chunks(lst, n):
 
 
 def get_rows(df):
-    df["video_created_time"] = df["video_created_time"].dt.strftime("%Y-%m-%dT%H:%M:%S")
+
     df = df.where(pd.notnull(df), None)
     df = df[[field for field, _, __ in FIELDS]]
     rows = df.to_dict(orient="records")
