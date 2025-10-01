@@ -32,14 +32,31 @@ Examples:
         # Sends: "Hi world"
 
 """
-from typing import Callable, Any, Optional
+import enum
+from typing import Callable, Any, Optional, Literal
 import functools, os, logging, traceback
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 _log = logging.getLogger(__name__)
 
-def _prepare_message(text:str, **kwargs):
+
+class TextLevel(enum.Enum):
+    DEBUG = "🔍"
+    INFO = "ℹ️"
+    WARNING = "⚠️"
+    ERROR = "⛔"
+    CRITICAL = "🔥"
+
+    @staticmethod
+    def get(level_name: str):
+        enum = getattr(__class__, level_name.upper())
+        return enum.name, enum.value
+
+def _prepare_message(text:str, *,
+                     text_level:Optional[TextLevel]='info',
+                     **kwargs):
+    
     text = text.strip(kwargs.get("strip", None))
     text = text[0].upper() + text[1:] if len(text) > 0 else text
 
@@ -51,6 +68,10 @@ def _prepare_message(text:str, **kwargs):
         text = kwargs.get("_func")(text)
         if text is None:
             raise TypeError(f"Function {kwargs.get('_func')} returned None instead of str")
+
+    if text_level:
+        name, emoji = TextLevel.get(str(text_level))
+        text = f"{emoji} *{name}* {text}"
 
     return text
 
@@ -97,12 +118,12 @@ def notify_on_exception(func: Callable,
                 filename = "sconosciuto"
                 lineno = "-1"
 
-            error_msg = f"❌ *Errore* `{type(e).__name__}` [ _app/{filename}_ : {lineno} ] \n\n"
+            error_msg = f"❌ *EXCEPTION* `{type(e).__name__}` [ _app/{filename}_ : {lineno} ] \n\n"
             error_msg += f"La funzione `{func.__name__}` ha generato un `{type(e).__name__}`:"
             error_msg += f"\t```{str(e)}\n{message}```\n"
 
             try:
-                send(error_msg, **message_kwargs)
+                send(error_msg, text_level=None, **message_kwargs)
             except Exception as e:
                 _log.exception(f"Error sending error message:\n{e}")
             if not silent:
