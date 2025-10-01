@@ -107,7 +107,7 @@ def notify_on_exception(func: Callable,
     def wrapper(*args, **kwargs) -> Any:
         try:
             return func(*args, **kwargs)
-        except Exception as e:
+        except BaseException as e:
 
             tb = traceback.extract_tb(e.__traceback__)
             if tb:
@@ -118,7 +118,7 @@ def notify_on_exception(func: Callable,
                 filename = "sconosciuto"
                 lineno = "-1"
 
-            error_msg = f"❌ *EXCEPTION* `{type(e).__name__}` [ _app/{filename}_ : {lineno} ] \n\n"
+            error_msg = f"❌ *EXCEPTION* `{type(e).__name__}` [ _{filename}_ : {lineno} ] \n\n"
             error_msg += f"La funzione `{func.__name__}` ha generato un `{type(e).__name__}`:"
             error_msg += f"\t```{str(e)}\n{message}```\n"
 
@@ -151,8 +151,7 @@ def _notify_decorator(func: Callable, **kwargs) -> Callable:
         return decorator(func)
     return decorator
 
-@notify_on_exception
-def notify(_: Callable | str = None, **kwargs):
+def notify(_: Optional[Callable | str] = None, **kwargs):
     if _ is None or (isinstance(_, Callable) and callable(_)):
         return _notify_decorator(func=_, **kwargs)
 

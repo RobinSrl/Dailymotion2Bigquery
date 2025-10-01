@@ -3,6 +3,9 @@ from functools import partial
 from typing import Any
 from dailymotion import Authentication, DailymotionClient, recursive_search_key
 from bigquery_transfer import transfer
+from slack_chat import notify, notify_on_exception
+
+os.environ["DEBUG"] = "True"
 
 logging.basicConfig(
     level=logging.DEBUG if bool(os.getenv("DEBUG", False)) else logging.INFO,
@@ -94,6 +97,7 @@ class DailyMotionDataHandle(object):
 
         self.__data = self.__refining(merged_df)
 
+    @notify_on_exception
     def __fetch_main_data_form_graphql(self, query: str, variables: dict[str, Any]) -> None:
         """
         Executes a GraphQL report mutation via the Dailymotion API, retrieves CSV report download links,
@@ -132,6 +136,7 @@ class DailyMotionDataHandle(object):
 
         self.__data = pd.concat(dataframes, ignore_index=True)
 
+    @notify_on_exception
     def __fetch_details_from_rest(self, name: str, ids: list[str], fields: list[str]) -> pd.DataFrame:
         """
         Retrieve resource details from the Dailymotion REST API for a list of IDs and return as a single DataFrame.
@@ -165,6 +170,7 @@ class DailyMotionDataHandle(object):
                 continue
         return dataframe_fetched_by_ids.add_prefix("%s_" % name.lower())
 
+    @notify_on_exception
     def async_fetch_rest_details_by_id(self, name: str, ids: list[str], fields: list[str]) -> pd.DataFrame:
         async def async_wrapper():
             # Crea un semaforo per limitare la concorrenza
@@ -208,6 +214,7 @@ class DailyMotionDataHandle(object):
         # Esegue il wrapper asincrono e restituisce il risultato
         return asyncio.run(async_wrapper())
 
+    @notify_on_exception
     def __refining(self, df:pd.DataFrame) -> pd.DataFrame:
         if 'video_created_time' in df.columns:
             df["video_created_time"] = pd.to_datetime(df["video_created_time"], unit="s", utc=True)
@@ -260,9 +267,11 @@ class DailyMotionDataHandle(object):
             self.__data.rename(columns={'hour': 'day'}, inplace=True)
 
 
-
 start_time = time.time()
 if __name__ == "__main__":
+    notify(f"[{datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S %Z")}]  Start script", text_level="debug")
+
+
     yesterday_date = datetime.date.today() - datetime.timedelta(days=1)
 
     query = '''mutation MultiReport($video: AskPartnerReportFileInput!) {
@@ -294,7 +303,6 @@ if __name__ == "__main__":
               "product": "ALL"
         }
     }
-
     auth = Authentication.from_credential(
         os.getenv("DM_CLIENT_API"),
         os.getenv("DM_CLIENT_SECRET"),
@@ -305,6 +313,7 @@ if __name__ == "__main__":
     data_handler.fetch(query, variables)
     df = data_handler.data.reset_index(drop=True)
 
-    transfer(df)
+    notify_on_exception(transfer)(df)
 
+    notify(f"Script eseguito con successo\n *{len(df)}* record sono stati trasferiti in {round(int(time.time() - start_time) / 60, 1) } minuti ")
     logging.info("Executed in %d seconds" % (time.time() - start_time) )

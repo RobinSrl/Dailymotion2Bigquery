@@ -149,8 +149,9 @@ def transfer(df):
             insert_job = client.query(MERGE_QUERY)
             insert_job.result()
             if insert_job.errors:
-                # raise ValueError(f"Job failed: {insert_job.errors}")
                 logging.info(f"Job failed: {insert_job.errors}")
+                raise ValueError(f"Job failed: {insert_job.errors}")
             logging.info("done")
         except Exception as e:
             logging.info(f"error: {e}")
+            raise
