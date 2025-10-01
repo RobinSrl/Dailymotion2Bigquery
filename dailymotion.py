@@ -569,6 +569,7 @@ class DailymotionClient(object):
 
             # Check for GraphQL errors in response and raise exception if found
             if response.get('errors'):
+                log.exception(response['errors'])
                 raise DailymotionReportException(response['errors'][0]['message'])
             return response
         except JSONDecodeError as e:

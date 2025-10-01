@@ -1,9 +1,6 @@
-import asyncio
-import datetime
-import logging, os, time
+import logging, os, time, asyncio, datetime,  pandas as pd
 from functools import partial
 from typing import Any
-import pandas as pd
 from dailymotion import Authentication, DailymotionClient, recursive_search_key
 from bigquery_transfer import transfer
 
@@ -153,7 +150,6 @@ class DailyMotionDataHandle(object):
         """ WARNING:
         2nd Massive blocking time
         """
-        #TODO: Make this with async httpx
         for item_id in ids:  # every id (unique)
             try:
                 # Fetch details via REST API
@@ -229,6 +225,7 @@ class DailyMotionDataHandle(object):
         df['video_duration'] = df['video_duration'].fillna(0).astype(int)
 
         df['day'] = pd.to_datetime(df['day']).dt.strftime('%Y-%m-%d')
+        df["video_created_time"] = pd.to_datetime(df["video_created_time"]).dt.strftime("%Y-%m-%dT%H:%M:%S")
 
         return df.sort_values(by=['day', 'video_id'])
 
@@ -307,5 +304,7 @@ if __name__ == "__main__":
     data_handler = DailyMotionDataHandle(DailymotionClient(auth))
     data_handler.fetch(query, variables)
     df = data_handler.data.reset_index(drop=True)
+
     transfer(df)
+
     logging.info("Executed in %d seconds" % (time.time() - start_time) )

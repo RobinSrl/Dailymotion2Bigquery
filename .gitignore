@@ -11,3 +11,4 @@ __pycache__/
 v
 test_*
 test/
+.csv
