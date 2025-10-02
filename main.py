@@ -289,7 +289,7 @@ if __name__ == "__main__":
                 "PLAYER_ID",
                 "PLAYLIST_ID"
               ],
-              "startDate": yesterday_date.strftime('%Y-%m-%d'),
+              "startDate": (yesterday_date - datetime.timedelta(days=1)).strftime('%Y-%m-%d'),
               "endDate": yesterday_date.strftime('%Y-%m-%d'),
               "product": "ALL"
         }
@@ -304,6 +304,7 @@ if __name__ == "__main__":
     data_handler = DailyMotionDataHandle(DailymotionClient(auth))
     data_handler.fetch(query, variables)
     df = data_handler.data.reset_index(drop=True)
+    df = df[df['day'] >= yesterday_date.strftime('%Y-%m-%d')]
 
     transfer(df)
 
