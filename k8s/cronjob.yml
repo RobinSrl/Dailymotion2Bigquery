@@ -5,7 +5,7 @@ metadata:
   name: dailymotion-dp-stream-cronjob
   namespace: frontend
 spec:
-  schedule: "01 10 * * *"
+  schedule: "01 09 * * *"
   concurrencyPolicy: Allow
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 1
