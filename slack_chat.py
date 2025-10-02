@@ -39,7 +39,7 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 _log = logging.getLogger(__name__)
-
+SLACK_CHANNEL="C09HS60BRA9"
 
 class TextLevel(enum.Enum):
     DEBUG = "🔍"
@@ -47,6 +47,7 @@ class TextLevel(enum.Enum):
     WARNING = "⚠️"
     ERROR = "⛔"
     CRITICAL = "🔥"
+    EXCEPTION = "❌"
 
     @staticmethod
     def get(level_name: str):
@@ -75,7 +76,9 @@ def _prepare_message(text:str, *,
 
     return text
 
-def send(message:str, **kwargs):
+def send(message:str,*,
+         channel,
+         **kwargs):
     # Initialize Slack client with token
     client = WebClient(token=os.getenv("SLACK_BOT_TOKEN"))
 
@@ -83,7 +86,7 @@ def send(message:str, **kwargs):
 
     try:
         response = client.chat_postMessage(
-            channel=os.getenv("SLACK_CHANNEL"),
+            channel=channel,
             text=message,
             **kwargs
         )
@@ -118,12 +121,12 @@ def notify_on_exception(func: Callable,
                 filename = "sconosciuto"
                 lineno = "-1"
 
-            error_msg = f"❌ *EXCEPTION* `{type(e).__name__}` [ _{filename}_ : {lineno} ] \n\n"
+            error_msg = f"`{type(e).__name__}` [ _{filename}_ : {lineno} ] \n\n"
             error_msg += f"La funzione `{func.__name__}` ha generato un `{type(e).__name__}`:"
             error_msg += f"\t```{str(e)}\n{message}```\n"
 
             try:
-                send(error_msg, text_level=None, **message_kwargs)
+                send(error_msg, channel=SLACK_CHANNEL, text_level='exception', **message_kwargs)
             except Exception as e:
                 _log.exception(f"Error sending error message:\n{e}")
             if not silent:
@@ -157,7 +160,7 @@ def notify(_: Optional[Callable | str] = None, **kwargs):
 
     elif isinstance(_, str):
         if _ and _.strip() != "" and not _.isspace():
-            return send(_, **kwargs)
+            return send(_, channel=SLACK_CHANNEL, **kwargs)
         _log.warning('The sting must not be empty or only whitespaces')
         return None
     else:

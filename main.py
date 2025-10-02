@@ -5,7 +5,6 @@ from dailymotion import Authentication, DailymotionClient, recursive_search_key
 from bigquery_transfer import transfer
 from slack_chat import notify, notify_on_exception
 
-os.environ["DEBUG"] = "True"
 
 logging.basicConfig(
     level=logging.DEBUG if bool(os.getenv("DEBUG", False)) else logging.INFO,
@@ -115,6 +114,7 @@ class DailyMotionDataHandle(object):
         """
 
         # Execute the GraphQL report mutation and get the list of CSV report download links
+        _start = time.time()
         report_links = self.__client.get_report_file(query=query, variable=variables)
         self.__logger.info(f"report links: {report_links}")
 
@@ -134,6 +134,7 @@ class DailyMotionDataHandle(object):
         if not dataframes:
             raise ValueError(f"No dataframes created")
 
+        notify(f"Dailymotion ha generato il report in {int((time.time() - _start))} secondi")
         self.__data = pd.concat(dataframes, ignore_index=True)
 
     @notify_on_exception
@@ -313,7 +314,12 @@ if __name__ == "__main__":
     data_handler.fetch(query, variables)
     df = data_handler.data.reset_index(drop=True)
 
-    notify_on_exception(transfer)(df)
+    # notify_on_exception(transfer)(df)
 
-    notify(f"Script eseguito con successo\n *{len(df)}* record sono stati trasferiti in {round(int(time.time() - start_time) / 60, 1) } minuti ")
+    notify(f"_{len(df)} records_ sono stati trasferiti su "
+           f"<https://console.cloud.google.com/bigquery?project=smart-data-platform-dev-401609&ws=!1m9!1m3!3m2!1ssmart-data-platform-dev-401609!2scustom!1m4!4m3!1ssmart-data-platform-dev-401609!2srobin_custom!3sdailymotion_default_data&inv=1&invt=AbkQ8g|BigQuery>"
+           f" in {int(round((time.time() - start_time) / 60))} minuti"
+           f"\n\n Guarda il report "
+           f"<https://lookerstudio.google.com/reporting/36146039-563a-4f18-8ebd-f32f62f5d2d7/page/AOWBF|Dati Video>")
+
     logging.info("Executed in %d seconds" % (time.time() - start_time) )
