@@ -18,6 +18,10 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 _log = logging.getLogger(__name__)
+<<<<<<< HEAD
+=======
+
+>>>>>>> feature/earnings
 SLACK_CHANNEL= os.getenv('SLACK_CHANNEL', 'C09JYN7M73J')
 
 class TextLevel(enum.Enum):
