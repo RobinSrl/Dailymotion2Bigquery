@@ -313,7 +313,7 @@ if __name__ == "__main__":
     data_handler = DailyMotionDataHandle(DailymotionClient(auth))
     data_handler.fetch(query, variables)
     df = data_handler.data.reset_index(drop=True)
-    df = df[df['day'] >= yesterday_date.strftime('%Y-%m-%d')]
+    df = df[df['day'] == yesterday_date.strftime('%Y-%m-%d')]
 
     notify_on_exception(transfer)(df)
 

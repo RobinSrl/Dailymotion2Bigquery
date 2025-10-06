@@ -10,36 +10,16 @@ Main functions:
 
 The module requires SLACK_BOT_TOKEN and SLACK_CHANNEL environment variables to be set.
 
-Examples:
-    Simple message sending:
-        >>> from slack_chat import send, notify
-        >>> notify("Hello World!")
-        >>> send("Hello World!")
-
-    Using as exception handler:
-        >>> @notify
-        ... def risky_operation():
-        ...     raise ValueError("Something went wrong")
-
-    Detailed exception handling:
-        >>> @notify_on_exception(silent=True, message="Custom error message") # == @notify(silent=True, message="Custom error message")
-        ... def another_risky_operation():
-        ...     raise ValueError("Another error")
-        >>>
-
-    Using with custom message formatting:
-        >>> notify("hello world", strip=" ", replace=("hello", "hi"))
-        # Sends: "Hi world"
-
 """
-import enum
+import enum, os
 from typing import Callable, Any, Optional, Literal
 import functools, os, logging, traceback
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 _log = logging.getLogger(__name__)
-SLACK_CHANNEL="C09HS60BRA9"
+
+SLACK_CHANNEL= os.getenv('SLACK_CHANNEL', 'C09JYN7M73J')
 
 class TextLevel(enum.Enum):
     DEBUG = "🔍"
@@ -155,6 +135,27 @@ def _notify_decorator(func: Callable, **kwargs) -> Callable:
     return decorator
 
 def notify(_: Optional[Callable | str] = None, **kwargs):
+    """Send messages to Slack or decorate functions for exception handling.
+
+    This function can be used in two ways:
+    1. As a decorator: Wraps functions to catch exceptions and send notifications to Slack
+    2. As a direct sender: Sends a message directly to the configured Slack channel
+
+    Args:
+        _: Either a callable (when used as decorator) or a string message (when used directly)
+        **kwargs: Additional arguments passed to the Slack message
+            - silent (bool): If True, suppresses re-raising of caught exceptions
+            - message (str): Additional message to append to exception notifications
+            - Any other kwargs are passed directly to the Slack API
+
+    Returns:
+        - When used as decorator: Returns decorated function
+        - When used as sender: Returns True if message sent successfully, None if empty message
+
+    Raises:
+        TypeError: If the input is neither a Callable nor a string
+    """
+
     if _ is None or (isinstance(_, Callable) and callable(_)):
         return _notify_decorator(func=_, **kwargs)
 
