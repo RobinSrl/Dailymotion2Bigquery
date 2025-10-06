@@ -1,11 +1,11 @@
-import asyncio
-import datetime
-import logging, os, time
+import logging, os, time, asyncio, datetime,  pandas as pd
+from decimal import Decimal
 from functools import partial
 from typing import Any
-import pandas as pd
 from dailymotion import Authentication, DailymotionClient, recursive_search_key
 from bigquery_transfer import transfer
+from slack_chat import notify, notify_on_exception
+
 
 logging.basicConfig(
     level=logging.DEBUG if bool(os.getenv("DEBUG", False)) else logging.INFO,
@@ -60,15 +60,16 @@ class DailyMotionDataHandle(object):
        """
         return self.__data.copy()
 
-    def fetch(self, init_query:str, init_variables:dict[str, Any]) -> None:
+    def fetch(self, *, metrics:list[str], dimension:list[str], start_date:datetime.date, end_date:datetime.date, product:str = None) -> None:
         """Initialize and process the complete DailyMotion data pipeline.
 
         Orchestrates the full workflow of report generation, data extraction,
         metadata enrichment, and data refinement. This method coordinates all
         the private methods to produce a final enriched dataset.
         """
-
+        init_query, init_variables = self._prepare_query(metrics=metrics, dimension=dimension, start_date=start_date, end_date=end_date, product=product)
         self.__fetch_main_data_form_graphql(init_query, init_variables)
+        #TODO: Crea un unica query per prendere i report sia di earnings sia di views
         self.cluster_data_by_day()
 
         self.__logger.info("Fetch details from REST API for video, playlist, player IDs")
@@ -81,6 +82,7 @@ class DailyMotionDataHandle(object):
         # Iterate over each unique, non-null playlist ID
         # LEFT JOIN (sql) to merge the dataframe
         merged_df = self.data
+        merged_df = self._get_earnings(df_to_merge=merged_df)
 
         if df_info_from_id['video'] is not None and not df_info_from_id['video'].empty and 'video_id' in merged_df.columns.tolist():
             merged_df = merged_df.merge(df_info_from_id['video'], on='video_id', how='left')
@@ -88,15 +90,16 @@ class DailyMotionDataHandle(object):
         if df_info_from_id['playlist'] is not None and not df_info_from_id['playlist'].empty and 'playlist_id' in merged_df.columns.tolist():
             merged_df = merged_df.merge(df_info_from_id['playlist'], on='playlist_id', how='left')
         else:
-            merged_df['playlist_name'] = pd.NA  # if there is no playlist_id in the cluster_df, fill playlist_name with NaN
+            merged_df['playlist_name'] = None  # if there is no playlist_id in the cluster_df, fill playlist_name with NaN
 
         if df_info_from_id['player'] is not None and not df_info_from_id['player'].empty and 'player_id' in merged_df.columns.tolist():
             merged_df = merged_df.merge(df_info_from_id['player'], on='player_id', how='left')
         else:
-            merged_df['player_label'] = pd.NA  # if there is no player_id in the cluster_df, fill player_label with NaN
+            merged_df['player_label'] = None  # if there is no player_id in the cluster_df, fill player_label with NaN
 
         self.__data = self.__refining(merged_df)
 
+    @notify_on_exception
     def __fetch_main_data_form_graphql(self, query: str, variables: dict[str, Any]) -> None:
         """
         Executes a GraphQL report mutation via the Dailymotion API, retrieves CSV report download links,
@@ -114,6 +117,7 @@ class DailyMotionDataHandle(object):
         """
 
         # Execute the GraphQL report mutation and get the list of CSV report download links
+        _start = time.time()
         report_links = self.__client.get_report_file(query=query, variable=variables)
         self.__logger.info(f"report links: {report_links}")
 
@@ -133,8 +137,10 @@ class DailyMotionDataHandle(object):
         if not dataframes:
             raise ValueError(f"No dataframes created")
 
+        notify(f"Dailymotion ha generato il report in {int((time.time() - _start))} secondi")
         self.__data = pd.concat(dataframes, ignore_index=True)
 
+    @notify_on_exception
     def __fetch_details_from_rest(self, name: str, ids: list[str], fields: list[str]) -> pd.DataFrame:
         """
         Retrieve resource details from the Dailymotion REST API for a list of IDs and return as a single DataFrame.
@@ -153,7 +159,6 @@ class DailyMotionDataHandle(object):
         """ WARNING:
         2nd Massive blocking time
         """
-        #TODO: Make this with async httpx
         for item_id in ids:  # every id (unique)
             try:
                 # Fetch details via REST API
@@ -169,6 +174,7 @@ class DailyMotionDataHandle(object):
                 continue
         return dataframe_fetched_by_ids.add_prefix("%s_" % name.lower())
 
+    @notify_on_exception
     def async_fetch_rest_details_by_id(self, name: str, ids: list[str], fields: list[str]) -> pd.DataFrame:
         async def async_wrapper():
             # Crea un semaforo per limitare la concorrenza
@@ -212,6 +218,7 @@ class DailyMotionDataHandle(object):
         # Esegue il wrapper asincrono e restituisce il risultato
         return asyncio.run(async_wrapper())
 
+    @notify_on_exception
     def __refining(self, df:pd.DataFrame) -> pd.DataFrame:
         if 'video_created_time' in df.columns:
             df["video_created_time"] = pd.to_datetime(df["video_created_time"], unit="s", utc=True)
@@ -224,11 +231,14 @@ class DailyMotionDataHandle(object):
         #     df['view_through_rate'] = df['view_through_rate'] / 100
 
         if not 'estimated_earnings_eur' in df.columns:
-            df['estimated_earnings_eur'] = "0"
+            df['estimated_earnings_eur'] = '0'
+        else:
+            df['estimated_earnings_eur'] = df['estimated_earnings_eur'].fillna(0).apply(lambda x: Decimal(x))
 
         df['video_duration'] = df['video_duration'].fillna(0).astype(int)
 
         df['day'] = pd.to_datetime(df['day']).dt.strftime('%Y-%m-%d')
+        df["video_created_time"] = pd.to_datetime(df["video_created_time"]).dt.strftime("%Y-%m-%dT%H:%M:%S")
 
         return df.sort_values(by=['day', 'video_id'])
 
@@ -262,10 +272,74 @@ class DailyMotionDataHandle(object):
         if 'hour' in self.__data.columns:
             self.__data.rename(columns={'hour': 'day'}, inplace=True)
 
+    @staticmethod
+    def _prepare_query(*, metrics:list[str], dimension:list[str], start_date:datetime.date, end_date:datetime.date, product:str = None):
 
+        query = '''mutation MultiReport($item: AskPartnerReportFileInput!) {
+              report1: askPartnerReportFile(input: $item) {
+                reportFile { reportToken }
+              }
+             }'''
+
+        if isinstance(metrics, str):
+            metrics = [metrics]
+        elif metrics is None:
+            metrics = []
+
+        if isinstance(dimension, str):
+            dimension = [dimension]
+        elif dimension is None:
+            dimension = []
+
+
+        variables = {
+            "item": {
+                "metrics": [met.upper() for met in metrics],
+                "dimensions": [dim.upper() for dim in dimension],
+                "startDate": start_date.strftime('%Y-%m-%d'),
+                "endDate": end_date.strftime('%Y-%m-%d'),
+                "product": product.upper() if product is not None else 'ALL'
+            }
+        }
+        return query, variables
+
+    def _get_earnings(self,*, df_to_merge:pd.DataFrame=None):
+        dimension = ['day', 'video_id', "visitor_page_url", "visitor_device_type"]
+        query, variable = self._prepare_query(metrics=['ESTIMATED_EARNINGS_EUR'],
+                            dimension=dimension,
+                            start_date=(datetime.date.today() - datetime.timedelta(days=2)),
+                            end_date=datetime.date.today(),
+                            product="ALL")
+        _start = time.time()
+        report_links = self.__client.get_report_file(query=query, variable=variable)
+        self.__logger.info(f"report links: {report_links}")
+
+        dataframes = []
+
+        for link in report_links:
+            self.__logger.info(f"Reading CSV from {link}")
+            dataframes.append(pd.read_csv(link, dtype={6: str}))
+
+        if not dataframes:
+            raise ValueError(f"No dataframes created")
+
+        notify(f"Dailymotion ha generato il report in {int((time.time() - _start))} secondi")
+        df = pd.concat(dataframes, ignore_index=True)
+        df['day'] = pd.to_datetime(df['day'], utc=True, errors='coerce').dt.tz_convert(
+            'Europe/Rome').dt.date
+        if df_to_merge is None:
+            return df
+
+        return df_to_merge.merge(df, on=dimension, how='left')
+
+
+            
 
 start_time = time.time()
 if __name__ == "__main__":
+    notify(f"[{datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S %Z")}]  Start script", text_level="debug")
+
+
     yesterday_date = datetime.date.today() - datetime.timedelta(days=1)
 
     query = '''mutation MultiReport($video: AskPartnerReportFileInput!) {
@@ -292,7 +366,7 @@ if __name__ == "__main__":
                 "PLAYER_ID",
                 "PLAYLIST_ID"
               ],
-              "startDate": yesterday_date.strftime('%Y-%m-%d'),
+              "startDate": (yesterday_date - datetime.timedelta(days=1)).strftime('%Y-%m-%d'),
               "endDate": yesterday_date.strftime('%Y-%m-%d'),
               "product": "ALL"
         }
@@ -305,7 +379,20 @@ if __name__ == "__main__":
     )
 
     data_handler = DailyMotionDataHandle(DailymotionClient(auth))
-    data_handler.fetch(query, variables)
+    data_handler.fetch(metrics=['VIEWS', 'TIME_WATCHED_SECONDS', 'VIEW_THROUGH_RATE'],
+                       dimension=["HOUR","VIDEO_ID",  "MEDIA_TYPE","VISITOR_PAGE_URL","VISITOR_DEVICE_TYPE","PLAYER_ID","PLAYLIST_ID"],
+                       start_date=(yesterday_date - datetime.timedelta(days=1)),
+                       end_date= yesterday_date,
+    )
     df = data_handler.data.reset_index(drop=True)
-    transfer(df)
+    df = df[df['day'] == yesterday_date.strftime('%Y-%m-%d')]
+
+    notify_on_exception(transfer)(df)
+
+    notify(f"_{len(df)} records_ sono stati trasferiti su "
+           f"<https://console.cloud.google.com/bigquery?project=smart-data-platform-dev-401609&ws=!1m9!1m3!3m2!1ssmart-data-platform-dev-401609!2scustom!1m4!4m3!1ssmart-data-platform-dev-401609!2srobin_custom!3sdailymotion_default_data&inv=1&invt=AbkQ8g|BigQuery>"
+           f" in {int(round((time.time() - start_time) / 60))} minuti"
+           f"\n\n Guarda il report "
+           f"<https://lookerstudio.google.com/reporting/36146039-563a-4f18-8ebd-f32f62f5d2d7/page/AOWBF|Dati Video>")
+
     logging.info("Executed in %d seconds" % (time.time() - start_time) )

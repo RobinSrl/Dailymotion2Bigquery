@@ -118,7 +118,6 @@ def chunks(lst, n):
 
 
 def get_rows(df):
-    df["video_created_time"] = df["video_created_time"].dt.strftime("%Y-%m-%dT%H:%M:%S")
     df = df.where(pd.notnull(df), None)
     df = df[[field for field, _, __ in FIELDS]]
     rows = df.to_dict(orient="records")
@@ -149,8 +148,9 @@ def transfer(df):
             insert_job = client.query(MERGE_QUERY)
             insert_job.result()
             if insert_job.errors:
-                # raise ValueError(f"Job failed: {insert_job.errors}")
                 logging.info(f"Job failed: {insert_job.errors}")
+                raise ValueError(f"Job failed: {insert_job.errors}")
             logging.info("done")
         except Exception as e:
             logging.info(f"error: {e}")
+            raise
