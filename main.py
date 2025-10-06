@@ -3,6 +3,8 @@ from functools import partial
 from typing import Any
 from dailymotion import Authentication, DailymotionClient, recursive_search_key
 from bigquery_transfer import transfer
+from slack_chat import notify, notify_on_exception
+
 
 logging.basicConfig(
     level=logging.DEBUG if bool(os.getenv("DEBUG", False)) else logging.INFO,
@@ -94,6 +96,7 @@ class DailyMotionDataHandle(object):
 
         self.__data = self.__refining(merged_df)
 
+    @notify_on_exception
     def __fetch_main_data_form_graphql(self, query: str, variables: dict[str, Any]) -> None:
         """
         Executes a GraphQL report mutation via the Dailymotion API, retrieves CSV report download links,
@@ -111,6 +114,7 @@ class DailyMotionDataHandle(object):
         """
 
         # Execute the GraphQL report mutation and get the list of CSV report download links
+        _start = time.time()
         report_links = self.__client.get_report_file(query=query, variable=variables)
         self.__logger.info(f"report links: {report_links}")
 
@@ -130,8 +134,10 @@ class DailyMotionDataHandle(object):
         if not dataframes:
             raise ValueError(f"No dataframes created")
 
+        notify(f"Dailymotion ha generato il report in {int((time.time() - _start))} secondi")
         self.__data = pd.concat(dataframes, ignore_index=True)
 
+    @notify_on_exception
     def __fetch_details_from_rest(self, name: str, ids: list[str], fields: list[str]) -> pd.DataFrame:
         """
         Retrieve resource details from the Dailymotion REST API for a list of IDs and return as a single DataFrame.
@@ -165,6 +171,7 @@ class DailyMotionDataHandle(object):
                 continue
         return dataframe_fetched_by_ids.add_prefix("%s_" % name.lower())
 
+    @notify_on_exception
     def async_fetch_rest_details_by_id(self, name: str, ids: list[str], fields: list[str]) -> pd.DataFrame:
         async def async_wrapper():
             # Crea un semaforo per limitare la concorrenza
@@ -208,6 +215,7 @@ class DailyMotionDataHandle(object):
         # Esegue il wrapper asincrono e restituisce il risultato
         return asyncio.run(async_wrapper())
 
+    @notify_on_exception
     def __refining(self, df:pd.DataFrame) -> pd.DataFrame:
         if 'video_created_time' in df.columns:
             df["video_created_time"] = pd.to_datetime(df["video_created_time"], unit="s", utc=True)
@@ -260,9 +268,11 @@ class DailyMotionDataHandle(object):
             self.__data.rename(columns={'hour': 'day'}, inplace=True)
 
 
-
 start_time = time.time()
 if __name__ == "__main__":
+    notify(f"[{datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S %Z")}]  Start script", text_level="debug")
+
+
     yesterday_date = datetime.date.today() - datetime.timedelta(days=1)
 
     query = '''mutation MultiReport($video: AskPartnerReportFileInput!) {
@@ -294,7 +304,6 @@ if __name__ == "__main__":
               "product": "ALL"
         }
     }
-
     auth = Authentication.from_credential(
         os.getenv("DM_CLIENT_API"),
         os.getenv("DM_CLIENT_SECRET"),
@@ -306,6 +315,12 @@ if __name__ == "__main__":
     df = data_handler.data.reset_index(drop=True)
     df = df[df['day'] >= yesterday_date.strftime('%Y-%m-%d')]
 
-    transfer(df)
+    notify_on_exception(transfer)(df)
+
+    notify(f"_{len(df)} records_ sono stati trasferiti su "
+           f"<https://console.cloud.google.com/bigquery?project=smart-data-platform-dev-401609&ws=!1m9!1m3!3m2!1ssmart-data-platform-dev-401609!2scustom!1m4!4m3!1ssmart-data-platform-dev-401609!2srobin_custom!3sdailymotion_default_data&inv=1&invt=AbkQ8g|BigQuery>"
+           f" in {int(round((time.time() - start_time) / 60))} minuti"
+           f"\n\n Guarda il report "
+           f"<https://lookerstudio.google.com/reporting/36146039-563a-4f18-8ebd-f32f62f5d2d7/page/AOWBF|Dati Video>")
 
     logging.info("Executed in %d seconds" % (time.time() - start_time) )
