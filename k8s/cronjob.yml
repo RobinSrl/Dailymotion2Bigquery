@@ -16,7 +16,7 @@ spec:
           serviceAccountName: bigquery-dp-dev
           containers:
             - name: dailymotion-dp-stream-always-on
-              image: europe-west8-docker.pkg.dev/monrif-sites-dev/monrif-frontend-dev/dailymotion-dp-stream:0.2.9
+              image: europe-west8-docker.pkg.dev/monrif-sites-dev/monrif-frontend-dev/dailymotion-dp-stream:0.3.1
               env:
                 - name: DM_BASE_URL
                   value: "https://partner.api.dailymotion.com"
@@ -36,6 +36,11 @@ spec:
                     secretKeyRef:
                       name: dailymotion-dp-stream-secrets
                       key: client_secret
+                - name: SLACK_BOT_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: dailymotion-dp-stream-secrets
+                      key: slack_token
               args:
                 - python
                 - main.py

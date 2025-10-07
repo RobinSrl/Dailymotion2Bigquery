@@ -14,7 +14,10 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
+
 MAX_CONCURRENCY = 10
+
+
 class DailyMotionDataHandle(object):
     """A comprehensive data handler for DailyMotion analytics and content information.
 
@@ -333,12 +336,10 @@ class DailyMotionDataHandle(object):
         return df_to_merge.merge(df, on=dimension, how='left')
 
 
-            
-
 start_time = time.time()
 if __name__ == "__main__":
-    notify(f"[{datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S %Z")}]  Start script", text_level="debug")
-
+    date_format = "%d/%m/%Y %H:%M:%S %Z"
+    notify(f"[{datetime.datetime.now().strftime(date_format)}]  Start script", text_level="debug")
 
     yesterday_date = datetime.date.today() - datetime.timedelta(days=1)
 

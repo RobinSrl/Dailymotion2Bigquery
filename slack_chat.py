@@ -18,11 +18,8 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 _log = logging.getLogger(__name__)
-<<<<<<< HEAD
-=======
+SLACK_CHANNEL = os.getenv('SLACK_CHANNEL', 'C09JYN7M73J')
 
->>>>>>> feature/earnings
-SLACK_CHANNEL= os.getenv('SLACK_CHANNEL', 'C09JYN7M73J')
 
 class TextLevel(enum.Enum):
     DEBUG = "🔍"
@@ -37,14 +34,14 @@ class TextLevel(enum.Enum):
         enum = getattr(__class__, level_name.upper())
         return enum.name, enum.value
 
-def _prepare_message(text:str, *,
-                     text_level:Optional[TextLevel]='info',
+
+def _prepare_message(text: str, *,
+                     text_level: Optional[TextLevel] = 'info',
                      **kwargs):
-    
     text = text.strip(kwargs.get("strip", None))
     text = text[0].upper() + text[1:] if len(text) > 0 else text
 
-    if kwargs.get("replace") and isinstance(kwargs.get("replace"),tuple) and len(kwargs.get("replace")) == 2:
+    if kwargs.get("replace") and isinstance(kwargs.get("replace"), tuple) and len(kwargs.get("replace")) == 2:
         old, new = kwargs.get("replace")
         text = text.replace(old, new)
 
@@ -59,7 +56,8 @@ def _prepare_message(text:str, *,
 
     return text
 
-def send(message:str,*,
+
+def send(message: str, *,
          channel,
          **kwargs):
     # Initialize Slack client with token
@@ -85,10 +83,9 @@ def send(message:str,*,
 ## DECORATOR
 def notify_on_exception(func: Callable,
                         *,
-                        silent:Optional[bool]=False,
-                        message:Optional[str]="",
+                        silent: Optional[bool] = False,
+                        message: Optional[str] = "",
                         **message_kwargs) -> Callable:
-
     @functools.wraps(func)
     def wrapper(*args, **kwargs) -> Any:
         try:
@@ -117,12 +114,14 @@ def notify_on_exception(func: Callable,
 
     return wrapper
 
+
 def notify_on_logging(func: Callable,
                       *,
                       level: int = logging.ERROR,
                       **message_kwargs) -> Callable:
     #TODO: Crea la funzione per intercettare e inviare il log
     raise NotImplementedError("The notify_on_logging function is not yet implemented")
+
 
 def _notify_decorator(func: Callable, **kwargs) -> Callable:
     def decorator(function: Callable) -> Callable:
@@ -136,6 +135,7 @@ def _notify_decorator(func: Callable, **kwargs) -> Callable:
     if func is not None:
         return decorator(func)
     return decorator
+
 
 def notify(_: Optional[Callable | str] = None, **kwargs):
     """Send messages to Slack or decorate functions for exception handling.
