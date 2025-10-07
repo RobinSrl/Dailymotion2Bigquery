@@ -1,11 +1,10 @@
 import logging, os, time, asyncio, datetime,  pandas as pd
-from decimal import Decimal
 from functools import partial
 from typing import Any
 from dailymotion import Authentication, DailymotionClient, recursive_search_key
-from bigquery_transfer import transfer
+from bigquery_transfer import transfer, get_rows
 from slack_chat import notify, notify_on_exception
-
+from zoneinfo import ZoneInfo
 
 logging.basicConfig(
     level=logging.DEBUG if bool(os.getenv("DEBUG", False)) else logging.INFO,
@@ -73,7 +72,7 @@ class DailyMotionDataHandle(object):
         init_query, init_variables = self._prepare_query(metrics=metrics, dimension=dimension, start_date=start_date, end_date=end_date, product=product)
         self.__fetch_main_data_form_graphql(init_query, init_variables)
         #TODO: Crea un unica query per prendere i report sia di earnings sia di views
-        self.cluster_data_by_day()
+        self.cluster_data_by_day(init_variables)
 
         self.__logger.info("Fetch details from REST API for video, playlist, player IDs")
         df_info_from_id={
@@ -236,7 +235,7 @@ class DailyMotionDataHandle(object):
         if not 'estimated_earnings_eur' in df.columns:
             df['estimated_earnings_eur'] = '0'
         else:
-            df['estimated_earnings_eur'] = df['estimated_earnings_eur'].fillna(0).apply(lambda x: Decimal(x))
+            df['estimated_earnings_eur'] = df['estimated_earnings_eur'].fillna(0).astype(str)
 
         df['video_duration'] = df['video_duration'].fillna(0).astype(int)
 
@@ -258,7 +257,7 @@ class DailyMotionDataHandle(object):
 
         return df_grouped.replace(-1, None)
 
-    def cluster_data_by_day(self):
+    def cluster_data_by_day(self, variables: dict[str, Any] = None):
         if 'hour' in self.__data.columns:
             # convert datetime in UTC into Date with timezone Europe/Rome
             self.__data['hour'] = pd.to_datetime(self.__data['hour'], utc=True, errors='coerce').dt.tz_convert(
@@ -294,7 +293,6 @@ class DailyMotionDataHandle(object):
         elif dimension is None:
             dimension = []
 
-
         variables = {
             "item": {
                 "metrics": [met.upper() for met in metrics],
@@ -326,7 +324,8 @@ class DailyMotionDataHandle(object):
         if not dataframes:
             raise ValueError(f"No dataframes created")
 
-        notify(f"Dailymotion ha generato il report in {int((time.time() - _start))} secondi")
+        notify(f"Dailymotion ha generato il report per earnings in {int((time.time() - _start))} secondi")
+
         df = pd.concat(dataframes, ignore_index=True)
         df['day'] = pd.to_datetime(df['day'], utc=True, errors='coerce').dt.tz_convert(
             'Europe/Rome').dt.date
@@ -338,40 +337,10 @@ class DailyMotionDataHandle(object):
 
 start_time = time.time()
 if __name__ == "__main__":
-    date_format = "%d/%m/%Y %H:%M:%S %Z"
-    notify(f"[{datetime.datetime.now().strftime(date_format)}]  Start script", text_level="debug")
+    date_format = "%d/%m/%Y %H:%M:%S %z"
+    notify(f"[{datetime.datetime.now(ZoneInfo('Europe/Rome')).strftime(date_format)}]  Start script", text_level="debug")
 
     yesterday_date = datetime.date.today() - datetime.timedelta(days=1)
-
-    query = '''mutation MultiReport($video: AskPartnerReportFileInput!) {
-      report1: askPartnerReportFile(input: $video) {
-        reportFile { reportToken }
-      }
-     }'''
-
-    variables ={
-        #TODO: inserire "ESTIMATED_EARNINGS_EUR" questa metrica deve essere fatta con un altra variabile perchè non
-        # è supportata dalla segnetazione oraria ma solo da quella giornaliera o mensile
-        "video": {
-              "metrics": [
-                "VIEWS",
-                "TIME_WATCHED_SECONDS",
-                "VIEW_THROUGH_RATE"
-              ],
-              "dimensions": [
-                "HOUR",
-                "VIDEO_ID",
-                "MEDIA_TYPE",
-                "VISITOR_PAGE_URL", #estrarre subdomain in viste
-                "VISITOR_DEVICE_TYPE",
-                "PLAYER_ID",
-                "PLAYLIST_ID"
-              ],
-              "startDate": (yesterday_date - datetime.timedelta(days=1)).strftime('%Y-%m-%d'),
-              "endDate": yesterday_date.strftime('%Y-%m-%d'),
-              "product": "ALL"
-        }
-    }
 
     auth = Authentication.from_credential(
         os.getenv("DM_CLIENT_API"),
