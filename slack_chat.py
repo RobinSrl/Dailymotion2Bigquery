@@ -15,7 +15,7 @@ import enum, os
 from typing import Callable, Any, Optional, Literal
 import functools, os, logging, traceback
 from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
+from slack_sdk.errors import SlackApiError, SlackClientError
 
 _log = logging.getLogger(__name__)
 SLACK_CHANNEL = os.getenv('SLACK_CHANNEL', 'C09JYN7M73J')
@@ -78,7 +78,9 @@ def send(message: str, *,
     except SlackApiError as e:
         _log.exception(f"Error sending message:\n{e.response['error']}")
         return False
-
+    except SlackClientError as e:
+        _log.exception(f"Error sending message:\n{e}")
+        return False
 
 ## DECORATOR
 def notify_on_exception(func: Callable,
