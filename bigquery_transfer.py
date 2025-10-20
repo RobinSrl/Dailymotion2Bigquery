@@ -3,6 +3,7 @@ import pandas as pd
 
 from enum import EnumMeta, Enum
 
+from google.api_core.exceptions import GoogleAPIError
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 
@@ -154,3 +155,36 @@ def transfer(df):
         except Exception as e:
             logging.info(f"error: {e}")
             raise
+
+def count(where_clause: str,*, timeout: int = 60):
+    client = bigquery.Client(project=PROJECT_NAME)
+    count_sql = f"SELECT COUNT(1) AS cnt FROM `{TABLE_ID_DEF}` WHERE {where_clause}"
+
+    try:
+        count_job = client.query(count_sql)
+        count_result = list(count_job.result(timeout=timeout))
+        if not count_result:
+            return 0
+        return int(count_result[0].cnt)
+    except Exception as e:
+        logging.exception(f"Exception during Count Query: {e}")
+        raise
+
+def delete(where_clause: str,*, dry_run: bool = False, timeout: int = 60):
+    client = bigquery.Client(project=PROJECT_NAME)
+    delete_sql = f"DELETE FROM {TABLE_ID_DEF} WHERE {where_clause}"
+
+    if dry_run:
+        job_config = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
+        client.query(delete_sql, job_config=job_config)  # lancerà una ValidationError se non valida
+        logging.info("valid DELETE (dry-run)")
+        return 0
+
+    delete_job = client.query(delete_sql)
+    delete_job.result(timeout=timeout)
+
+    affected_rows = getattr(delete_job, "num_dml_affected_rows", None)
+    if affected_rows is None:
+        return None
+
+    return int(affected_rows)
