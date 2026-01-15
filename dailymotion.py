@@ -318,6 +318,12 @@ class Authentication(object):
             raise DailymotionClientException(
                 'client_api and client_secret are required\npassed: {"client_api": %s, "client_secret": %s}' % (
                     client_api, client_secret))
+        if grant_type not in ["client_credentials", "password"]:
+            raise DailymotionClientException(
+                'grant_type must be either "client_credentials" or "password"\npassed: %s' % grant_type)
+
+        if scope is None or len(scope) == 0:
+            raise DailymotionClientException('scope must be a non-empty list\npassed: %s' % scope)
 
         if grant_type == "password":
             if kwargs.get('username', None) is None or kwargs.get('password', None) is None:
@@ -371,7 +377,7 @@ class Authentication(object):
         """
         return cls(client_api, client_secret, grant_type='client_credentials', scope=scope)
 
-    def __generate_token(self) -> Token:
+    def _generate_token(self) -> Token:
         """Generate new access token via OAuth2 authentication request.
 
         Makes an HTTP POST request to the DailyMotion OAuth2 token endpoint
@@ -399,7 +405,7 @@ class Authentication(object):
             data['password'] = self.password
 
         response = requests.post(
-            "%s" % os.environ.get('DM_AUTH_URL'),
+            "%s" % os.getenv('DM_AUTH_URL'),
             data=data
         )
 
@@ -407,8 +413,8 @@ class Authentication(object):
             data = json.loads(response.text)
             return Token(data['access_token'], data['refresh_token'], data['expires_in'], data['scope'],
                          data['token_type'])
-        else:
-            raise DailymotionAuthException('Authentication failed')
+
+        raise DailymotionAuthException('Authentication failed')
 
     def refresh_token(self) -> Token:
         """Refresh expired token using the stored refresh token.
@@ -431,7 +437,7 @@ class Authentication(object):
         }
 
         response = requests.post(
-            "%s" % os.environ.get('DM_AUTH_URL'),
+            "%s" % os.getenv('DM_AUTH_URL'),
             data=data
         )
 
@@ -442,7 +448,7 @@ class Authentication(object):
         else:
             raise DailymotionAuthException('Token refresh failed')
 
-    def get_token(self) -> Token:
+    def get_token(self, *, in_memory:bool = False) -> Token:
         """Get valid authentication token, refreshing or generating new if needed.
 
         This method implements the complete token management logic:
@@ -462,12 +468,12 @@ class Authentication(object):
             if token.is_expired():
                 try:
                     token = self.refresh_token()
-                    token.dump()
+                    token.dump() if not in_memory else None
                 except DailymotionAuthException:
                     raise DailymotionTokenExpired('Token was expired %d' % token.expires_in)
-        except (DailymotionTokenExpired, FileNotFoundError) as e:
-            token = self.__generate_token()
-            token.dump()
+        except (DailymotionTokenExpired, FileNotFoundError):
+            token = self._generate_token()
+            token.dump() if not in_memory else None
 
         return token
 
@@ -510,6 +516,8 @@ class DailymotionClient(object):
         ```
     """
 
+    BASE_URL = os.getenv('DM_BASE_URL').strip('/')
+
     def __init__(self, authentication: Authentication, **kwargs):
         """Initialize API client with authentication.
 
@@ -523,7 +531,7 @@ class DailymotionClient(object):
         self.__auth = authentication
         self.logger = kwargs.get('logger', logging.getLogger(f"{__name__}.{__class__.__name__}"))
         # Retrieve initial token from authentication system
-        self.token = self.__auth.get_token()
+        self.token = self.__auth.get_token(in_memory=kwargs.get("in_memory", False))
 
         # Initialize HTTP client session with proper headers
         self.__set_http_client()
@@ -564,7 +572,7 @@ class DailymotionClient(object):
 
         try:
             self.logger.debug(f"Execution graphql with: {{'query': {query},'variables': {variable}}}")
-            response = self._client.post("%s" % (os.environ.get("DM_GRAPH_URL")),
+            response = self._client.post("%s" % (os.getenv("DM_GRAPH_URL")),
                                          json={'query': query, 'variables': variable}).json()
 
             # Check for GraphQL errors in response and raise exception if found
@@ -598,14 +606,15 @@ class DailymotionClient(object):
         fields = {'fields': ','.join(fields) if fields else ''}
         data_merged = kwargs.get('data', {}) if isinstance(kwargs.get('data', {}), dict) else {}
         data_merged.update(kwargs.get('params', {}) if isinstance(kwargs.get('params', {}), dict) else {})
-
         try:
             self.logger.debug(f"Execution rest with data: {data_merged | fields}")
-            response = self._client.request(method='POST',
-                                            url="%s/%s" % (os.environ.get("DM_REST_URL"), path.strip('/')),
-                                            data=data_merged | fields,
+            response = self._client.request(method='GET',
+                                            url=f"{self.BASE_URL}/rest/{path.strip('/')}",
+                                            params=data_merged | fields,
                                             headers={'Content-Type': 'application/x-www-form-urlencoded'}
-                                            ).json()
+                                            )
+            self.logger.debug(f"Execution rest with data: {response}")
+            response = response.json()
 
             # Check for API errors in response and raise exception if found
             if response.get('error'):

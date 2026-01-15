@@ -232,12 +232,9 @@ class DailyMotionDataHandle(object):
         #     # convert view_through_rate from percentage to decimal
         #     df['view_through_rate'] = df['view_through_rate'] / 100
 
-        if not 'estimated_earnings_eur' in df.columns:
-            df['estimated_earnings_eur'] = '0'
-        else:
-            df['estimated_earnings_eur'] = df['estimated_earnings_eur'].fillna(0).astype(str)
+        df['estimated_earnings_eur'] = df['estimated_earnings_eur'].fillna(0).astype(str) if 'estimated_earnings_eur' in df.columns else '0'
 
-        df['video_duration'] = df['video_duration'].fillna(0).astype(int)
+        df['video_duration'] = df['video_duration'].fillna(0).astype(int) if 'video_duration' in df.columns else 0
 
         df['day'] = pd.to_datetime(df['day']).dt.strftime('%Y-%m-%d')
         df["video_created_time"] = pd.to_datetime(df["video_created_time"]).dt.strftime("%Y-%m-%dT%H:%M:%S")
