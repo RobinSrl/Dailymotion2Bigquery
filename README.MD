@@ -263,3 +263,4 @@ data_handler.data.to_json(orient='records', lines=True) # -> list[dict[str,Any]
 
 > [!CAUTION]
 > **L'esecuzione in media dura dai 10 ai 15 minuti per un giorno**
+
