@@ -20,11 +20,11 @@ spec:
               env:
                 - name: DM_BASE_URL
                   value: "https://partner.api.dailymotion.com"
-                - name: DM_AUTH_URL
+                - name: DM_AUTH_URL # Deprecated env var
                   value: "https://partner.api.dailymotion.com/oauth/v1/token"
-                - name: DM_GRAPH_URL
+                - name: DM_GRAPH_URL # Deprecated env var
                   value: "https://partner.api.dailymotion.com/graphql"
-                - name: DM_REST_URL
+                - name: DM_REST_URL # Deprecated env var
                   value: "https://partner.api.dailymotion.com/rest"
                 - name: DM_CLIENT_API
                   valueFrom:

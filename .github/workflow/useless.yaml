@@ -1,6 +1,6 @@
 name: 'Tests'
 run_name: 'Run Testcase for Dailymotion API by @${{ github.actor }}'
-on: push
+on: [push, pull_request]
 
 jobs:
   py_test:

@@ -5,6 +5,8 @@ from typing import Self, Any, Literal, Generator
 
 log = logging.getLogger(__name__)
 
+BASE_ENDPOINT = os.getenv('DM_BASE_URL', 'https://partner.api.dailymotion.com').strip('/')
+
 ## Client Exception/Error
 
 class DailymotionClientException(Exception):
@@ -404,10 +406,7 @@ class Authentication(object):
             data['username'] = self.username
             data['password'] = self.password
 
-        response = requests.post(
-            "%s" % os.getenv('DM_AUTH_URL'),
-            data=data
-        )
+        response = requests.post(f"{BASE_ENDPOINT}/oauth/v1/token", data=data)
 
         if response.status_code == 200:
             data = json.loads(response.text)
@@ -516,7 +515,6 @@ class DailymotionClient(object):
         ```
     """
 
-    BASE_URL = os.getenv('DM_BASE_URL').strip('/')
 
     def __init__(self, authentication: Authentication, **kwargs):
         """Initialize API client with authentication.
@@ -572,7 +570,7 @@ class DailymotionClient(object):
 
         try:
             self.logger.debug(f"Execution graphql with: {{'query': {query},'variables': {variable}}}")
-            response = self._client.post("%s" % (os.getenv("DM_GRAPH_URL")),
+            response = self._client.post(f"{BASE_ENDPOINT}/graphql",
                                          json={'query': query, 'variables': variable}).json()
 
             # Check for GraphQL errors in response and raise exception if found
@@ -608,8 +606,8 @@ class DailymotionClient(object):
         data_merged.update(kwargs.get('params', {}) if isinstance(kwargs.get('params', {}), dict) else {})
         try:
             self.logger.debug(f"Execution rest with data: {data_merged | fields}")
-            response = self._client.request(method='GET',
-                                            url=f"{self.BASE_URL}/rest/{path.strip('/')}",
+            response = self._client.request(method=kwargs.get('http_method', 'GET'),
+                                            url=f"{BASE_ENDPOINT}/rest/{path.strip('/')}",
                                             params=data_merged | fields,
                                             headers={'Content-Type': 'application/x-www-form-urlencoded'}
                                             )
