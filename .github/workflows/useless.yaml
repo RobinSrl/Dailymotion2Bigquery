@@ -1,5 +1,5 @@
 name: 'Tests'
-run_name: 'Run Testcase for Dailymotion API by @${{ github.actor }}'
+run-name: 'Run Testcase for Dailymotion API by @${{ github.actor }}'
 on: [push, pull_request]
 
 jobs:
@@ -18,4 +18,8 @@ jobs:
           pip install --upgrade pip 
           pip install -r requirements.txt
       - name: Testing
+        env:
+          DM_BASE_URL: ${{ env.ENDPOINT }}
+          DM_CLIENT_API: ${{ secrets.CLIENT_API }}
+          DM_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
         run: python -m unittest discover -s tests -p "*.py"

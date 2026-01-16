@@ -2,7 +2,7 @@ import logging, os, time, asyncio, datetime,  pandas as pd
 from functools import partial
 from typing import Any
 from dailymotion import Authentication, DailymotionClient, recursive_search_key
-from bigquery_transfer import transfer, get_rows
+from bigquery_transfer import transfer
 from slack_chat import notify, notify_on_exception
 from zoneinfo import ZoneInfo
 
@@ -332,12 +332,11 @@ class DailyMotionDataHandle(object):
         return df_to_merge.merge(df, on=dimension, how='left')
 
 
+DATE_TO_FETCH = datetime.date.today() - datetime.timedelta(days=1)
 start_time = time.time()
 if __name__ == "__main__":
     date_format = "%d/%m/%Y %H:%M:%S %z"
     notify(f"[{datetime.datetime.now(ZoneInfo('Europe/Rome')).strftime(date_format)}]  Start script", text_level="debug")
-
-    yesterday_date = datetime.date.today() - datetime.timedelta(days=1)
 
     auth = Authentication.from_credential(
         os.getenv("DM_CLIENT_API"),
@@ -350,11 +349,11 @@ if __name__ == "__main__":
     data_handler = DailyMotionDataHandle(DailymotionClient(auth))
     data_handler.fetch(metrics=['VIEWS', 'TIME_WATCHED_SECONDS', 'VIEW_THROUGH_RATE'],
                        dimension=["HOUR","VIDEO_ID",  "MEDIA_TYPE","VISITOR_PAGE_URL","VISITOR_DEVICE_TYPE","PLAYER_ID","PLAYLIST_ID"],
-                       start_date=(yesterday_date - datetime.timedelta(days=1)),
-                       end_date= yesterday_date,
+                       start_date=(DATE_TO_FETCH - datetime.timedelta(days=1)),
+                       end_date= DATE_TO_FETCH,
     )
     df = data_handler.data.reset_index(drop=True)
-    df = df[df['day'] == yesterday_date.strftime('%Y-%m-%d')]
+    df = df[df['day'] == DATE_TO_FETCH.strftime('%Y-%m-%d')]
 
     notify_on_exception(transfer)(df)
 

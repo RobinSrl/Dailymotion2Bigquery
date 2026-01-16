@@ -1,14 +1,10 @@
 # Virtual Environment
 venv/
-.env.local
+env/
+.env*
 *.json
 *.csv
 *.bkt*
 .idea
-# Python
 __pycache__/
-.env
-v
-test_*
-test/
-.csv
+local/
