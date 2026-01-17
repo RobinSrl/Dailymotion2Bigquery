@@ -342,7 +342,7 @@ if __name__ == "__main__":
         os.getenv("DM_CLIENT_API"),
         os.getenv("DM_CLIENT_SECRET"),
         scope=list(
-            {'create_reports', 'delete_reports', 'manage_reports', 'manage_videos', 'manage_player', 'manage_playlist'}
+            {'create_reports', 'delete_reports', 'manage_reports', 'manage_videos', 'manage_players', 'manage_playlists'}
             ) # list of a set because a set contains unique values
     )
 

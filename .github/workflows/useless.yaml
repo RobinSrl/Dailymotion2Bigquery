@@ -19,7 +19,7 @@ jobs:
           pip install -r requirements.txt
       - name: Testing
         env:
-          DM_BASE_URL: ${{ env.ENDPOINT }}
+          DM_BASE_URL: ${{ vars.ENDPOINT }}
           DM_CLIENT_API: ${{ secrets.CLIENT_API }}
           DM_CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
         run: python -m unittest discover -s tests -p "*.py"

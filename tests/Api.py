@@ -1,7 +1,7 @@
 import os
-from dataclasses import fields
 from unittest import TestCase
 import dailymotion as dm
+import main as dm_handler
 
 class Dailymotion(TestCase):
 
@@ -15,6 +15,22 @@ class Dailymotion(TestCase):
             scope=['create_reports', 'delete_reports', 'manage_reports']
         )
         self.client = dm.DailymotionClient(self.auth)
+
+    def test_endpoints(self):
+        self.assertIsNotNone(dm.BASE_ENDPOINT)
+        self.assertEqual(dm.BASE_ENDPOINT, os.getenv("DM_BASE_URL",  'https://partner.api.dailymotion.com').strip('/'))
+
+    def test_scopes(self):
+        valid_scopes = {"access_ads", "access_revenue", "create_reports", "delete_reports", "email", "manage_reports",
+                        "manage_likes", "manage_players", "manage_playlists", "manage_podcasts",
+                        "manage_subscriptions", "manage_subtitles", "manage_videos", "read_reports", "userinfo"}
+        scope = set(self.auth.scope)
+        self.assertTrue(
+            scope.issubset(valid_scopes),
+            f"Invalid scopes: {scope - valid_scopes}"
+        )
+        self.assertTrue(dm_handler.DailyMotionDataHandle.SCOPES, valid_scopes)
+
 
     def _test_auth(self):
         self.assertIsNotNone(self.auth)

@@ -247,11 +247,11 @@ class Token(object):
         with open(file_path, 'r') as f:
             data = json.load(f)
             return cls(
-                data['access_token'],
-                data['refresh_token'],
-                data['expires_in'],
-                data['scope'],
-                data['token_type'],
+                data.get('access_token'),
+                data.get('refresh_token'),
+                data.get('expires_in'),
+                data.get('scope'),
+                data.get('token_type'),
                 file_path
             )
 
@@ -300,6 +300,10 @@ class Authentication(object):
         username (str, optional): Username for password-based authentication
         password (str, optional): Password for password-based authentication
     """
+    VALID_SCOPES = ("access_ads", "access_revenue",  "create_reports",  "delete_reports", "email", "manage_reports",
+                    "manage_likes", "manage_players", "manage_playlists", "manage_podcasts",
+                    "manage_subscriptions", "manage_subtitles", "manage_videos", "read_reports", "userinfo")
+    AUTH_URL = f"{BASE_ENDPOINT}/oauth/v1/token"
 
     def __init__(self, client_api: str, client_secret: str, *, grant_type: Literal["client_credentials", "password"],
                  scope: list[str], **kwargs):
@@ -324,8 +328,8 @@ class Authentication(object):
             raise DailymotionClientException(
                 'grant_type must be either "client_credentials" or "password"\npassed: %s' % grant_type)
 
-        if scope is None or len(scope) == 0:
-            raise DailymotionClientException('scope must be a non-empty list\npassed: %s' % scope)
+        if scope is None or len(scope) == 0 or not set(scope) <= set(self.VALID_SCOPES): # set() <= set() means is subset of
+            raise DailymotionClientException(f"Scope must contain at least one of {self.VALID_SCOPES} \npassed: {set(scope).difference(self.VALID_SCOPES)}")
 
         if grant_type == "password":
             if kwargs.get('username', None) is None or kwargs.get('password', None) is None:
@@ -406,7 +410,7 @@ class Authentication(object):
             data['username'] = self.username
             data['password'] = self.password
 
-        response = requests.post(f"{BASE_ENDPOINT}/oauth/v1/token", data=data)
+        response = requests.post(self.AUTH_URL, data=data)
 
         if response.status_code == 200:
             data = json.loads(response.text)
@@ -470,7 +474,8 @@ class Authentication(object):
                     token.dump() if not in_memory else None
                 except DailymotionAuthException:
                     raise DailymotionTokenExpired('Token was expired %d' % token.expires_in)
-        except (DailymotionTokenExpired, FileNotFoundError):
+        except (FileNotFoundError, DailymotionClientException) as err:
+            log.warning(f"Token file not found or invalid: {err}")
             token = self._generate_token()
             token.dump() if not in_memory else None
 
