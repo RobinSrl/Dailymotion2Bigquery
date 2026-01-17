@@ -324,26 +324,30 @@ class Authentication(object):
             raise DailymotionClientException(
                 'client_api and client_secret are required\npassed: {"client_api": %s, "client_secret": %s}' % (
                     client_api, client_secret))
-        if grant_type not in ["client_credentials", "password"]:
+        if grant_type not in ("client_credentials", "password"):
             raise DailymotionClientException(
                 'grant_type must be either "client_credentials" or "password"\npassed: %s' % grant_type)
 
-        if scope is None or len(scope) == 0 or not set(scope) <= set(self.VALID_SCOPES): # set() <= set() means is subset of
+        if scope is None or len(scope) == 0:
+            raise DailymotionClientException('scope must be a non-empty list of strings\npassed: %s' % scope)
+        elif not set(scope) <= set(self.VALID_SCOPES): # set() <= set() means is subset of
             raise DailymotionClientException(f"Scope must contain at least one of {self.VALID_SCOPES} \npassed: {set(scope).difference(self.VALID_SCOPES)}")
 
         if grant_type == "password":
-            if kwargs.get('username', None) is None or kwargs.get('password', None) is None:
+            username = kwargs.get('username', None)
+            password = kwargs.get('password', None)
+            if username is None or password is None:
                 raise DailymotionAuthException(
-                    'username and password are required for password grant type\npassed: {"username": %s, "password": %s}' % (
-                        kwargs.get('username', None), kwargs.get('password', None)))
+                    f'username and password are required for password grant type\npassed: {{"username": {username}, "password": {password}}}')
+            self.username = username
+            self.password = password
 
         self.client_api = client_api
         self.__client_secret = client_secret
         self.grant_type = grant_type
         self.scope = scope
 
-        self.username = kwargs.get('username', None)
-        self.password = kwargs.get('password', None)
+
 
     @classmethod
     def from_password(cls, client_api: str, client_secret: str, *, username: str, password: str, scope: list[str]):
@@ -439,10 +443,7 @@ class Authentication(object):
             'refresh_token': Token.load().access_token
         }
 
-        response = requests.post(
-            "%s" % os.getenv('DM_AUTH_URL'),
-            data=data
-        )
+        response = requests.post(self.AUTH_URL, data=data)
 
         if response.status_code == 200:
             data = json.loads(response.text)
